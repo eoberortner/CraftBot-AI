@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
-import { Beer, Calculator, ShoppingCart, Building2, Database, TrendingUp, BarChart3, Users, Settings, MessageCircle } from 'lucide-react'
+import { Beer, Calculator, ShoppingCart, Building2, Database, TrendingUp, BarChart3, Users, Settings, MessageCircle, Search } from 'lucide-react'
 
 type Role = 'homebrewer' | 'brewery' | 'taproom' | null
 
@@ -78,6 +78,13 @@ export default function Home() {
           color: 'bg-purple-500 hover:bg-purple-600'
         },
         {
+          title: 'Market Intelligence',
+          description: 'Analyze local brewery competition and tap trends',
+          icon: Search,
+          href: '/market-intelligence',
+          color: 'bg-indigo-500 hover:bg-indigo-600'
+        },
+        {
           title: 'Inventory Management',
           description: 'Track ingredients and equipment across multiple recipes',
           icon: Database,
@@ -106,6 +113,13 @@ export default function Home() {
           icon: TrendingUp,
           href: '/taproom',
           color: 'bg-purple-500 hover:bg-purple-600'
+        },
+        {
+          title: 'Market Intelligence',
+          description: 'Analyze local brewery competition and tap trends',
+          icon: Search,
+          href: '/market-intelligence',
+          color: 'bg-indigo-500 hover:bg-indigo-600'
         },
         {
           title: 'Menu Optimization',
