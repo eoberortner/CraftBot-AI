@@ -13,6 +13,7 @@ import re
 import json
 import time
 import os
+import math
 from urllib.parse import urljoin, urlparse
 import logging
 from dotenv import load_dotenv
@@ -48,11 +49,28 @@ class Brewery:
     rating: Optional[float] = None
     hours: Optional[str] = None
     beers: List[Beer] = None
+    distance_miles: Optional[float] = None
     last_updated: Optional[str] = None
 
     def __post_init__(self):
         if self.beers is None:
             self.beers = []
+
+
+def calculate_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Calculate the great-circle distance between two points on Earth using Haversine formula"""
+    # Convert latitude and longitude from degrees to radians
+    lat1, lng1, lat2, lng2 = map(math.radians, [lat1, lng1, lat2, lng2])
+    
+    # Haversine formula
+    dlat = lat2 - lat1
+    dlng = lng2 - lng1
+    a = math.sin(dlat/2)**2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng/2)**2
+    c = 2 * math.asin(math.sqrt(a))
+    
+    # Radius of Earth in miles
+    R = 3959
+    return R * c
 
 class BreweryFinder:
     """Finds breweries using Google Places API"""
@@ -116,8 +134,20 @@ class BreweryFinder:
                 if brewery.name.lower() not in brewery_names_seen:
                     breweries_found.append(brewery)
                     brewery_names_seen.add(brewery.name.lower())
+            
+            # Calculate distances from the zip code coordinates
+            for brewery in breweries_found:
+                if brewery.latitude is not None and brewery.longitude is not None:
+                    brewery.distance_miles = calculate_distance(
+                        lat, lng, brewery.latitude, brewery.longitude
+                    )
+                else:
+                    brewery.distance_miles = float('inf')  # Put breweries without coordinates at the end
+            
+            # Sort by distance (closest first)
+            breweries_found.sort(key=lambda b: b.distance_miles if b.distance_miles is not None else float('inf'))
                 
-            logger.info(f"Found {len(breweries_found)} breweries using combined search strategies")
+            logger.info(f"Found {len(breweries_found)} breweries using combined search strategies, sorted by distance")
             return breweries_found[:15]  # Limit to 15 breweries
             
         except Exception as e:
@@ -251,6 +281,25 @@ class BreweryFinder:
                 hours="Mon-Wed: 3-10pm, Thu-Sat: 12-11pm, Sun: 12-9pm"
             )
         ]
+        
+        # Calculate mock distances (just for demo purposes)
+        # Use approximate coordinates for common zip codes
+        zip_coords = {
+            '94556': (37.8357, -122.1178),  # Moraga, CA
+            '94102': (37.7749, -122.4194),  # San Francisco, CA
+            '10001': (40.7505, -73.9934),   # New York, NY
+        }
+        
+        base_lat, base_lng = zip_coords.get(zipcode, (37.7749, -122.4194))  # Default to SF
+        
+        for brewery in mock_breweries:
+            if brewery.latitude and brewery.longitude:
+                brewery.distance_miles = calculate_distance(
+                    base_lat, base_lng, brewery.latitude, brewery.longitude
+                )
+        
+        # Sort by distance
+        mock_breweries.sort(key=lambda b: b.distance_miles if b.distance_miles is not None else float('inf'))
         
         logger.info(f"Using mock brewery data for zip code: {zipcode}")
         return mock_breweries
@@ -507,6 +556,7 @@ class BreweryDataService:
             'longitude': brewery.longitude,
             'rating': brewery.rating,
             'hours': brewery.hours,
+            'distance_miles': round(brewery.distance_miles, 2) if brewery.distance_miles is not None and brewery.distance_miles != float('inf') else None,
             'last_updated': brewery.last_updated,
             'beers': [
                 {
