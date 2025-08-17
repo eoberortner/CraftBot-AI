@@ -12,8 +12,13 @@ from typing import List, Optional, Dict, Any
 import re
 import json
 import time
+import os
 from urllib.parse import urljoin, urlparse
 import logging
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -52,11 +57,23 @@ class BreweryFinder:
     """Finds breweries using Google Places API"""
     
     def __init__(self, api_key: Optional[str] = None):
-        self.api_key = api_key or "YOUR_GOOGLE_PLACES_API_KEY"
+        # Load API key from environment variables or use provided key
+        self.api_key = api_key or os.getenv('GOOGLE_PLACES_API_KEY')
         self.base_url = "https://maps.googleapis.com/maps/api/place"
+        
+        if not self.api_key:
+            logger.warning(
+                "Google Places API key not found. Set GOOGLE_PLACES_API_KEY environment variable "
+                "or pass api_key parameter. Using mock data fallback."
+            )
     
     def find_breweries_by_zipcode(self, zipcode: str, radius_miles: int = 25) -> List[Brewery]:
         """Find breweries near a given zip code"""
+        # If no API key is available, use mock data
+        if not self.api_key:
+            logger.info(f"No Google Places API key available, using mock data for zip code: {zipcode}")
+            return self._get_mock_breweries(zipcode)
+        
         try:
             # First, get coordinates for the zip code
             geocode_url = f"{self.base_url}/textsearch/json"
@@ -67,6 +84,11 @@ class BreweryFinder:
             
             geocode_response = requests.get(geocode_url, params=geocode_params)
             geocode_data = geocode_response.json()
+            
+            # Check for API errors
+            if geocode_data.get('status') == 'REQUEST_DENIED':
+                logger.error(f"Google Places API request denied. Check API key and billing: {geocode_data.get('error_message', '')}")
+                return self._get_mock_breweries(zipcode)
             
             if not geocode_data.get('results'):
                 logger.warning(f"Could not find coordinates for zip code: {zipcode}")
@@ -88,12 +110,18 @@ class BreweryFinder:
             search_response = requests.get(search_url, params=search_params)
             search_data = search_response.json()
             
+            # Check for API errors
+            if search_data.get('status') == 'REQUEST_DENIED':
+                logger.error(f"Google Places API request denied: {search_data.get('error_message', '')}")
+                return self._get_mock_breweries(zipcode)
+            
             breweries = []
             for place in search_data.get('results', []):
                 brewery = self._parse_brewery_from_places(place)
                 if brewery:
                     breweries.append(brewery)
             
+            logger.info(f"Found {len(breweries)} breweries using Google Places API")
             return breweries[:10]  # Limit to 10 breweries
             
         except Exception as e:

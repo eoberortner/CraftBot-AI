@@ -184,15 +184,48 @@ aiohttp==3.10.11
 beautifulsoup4==4.12.3
 lxml==5.3.0
 requests==2.32.3
+python-dotenv==1.0.1
 ```
 
-### **Optional: Google Places API**
-Set up Google Places API key for live brewery discovery:
-```python
-service = BreweryDataService(google_api_key="YOUR_API_KEY")
+### **Environment Variables Setup**
+
+Create a `.env` file in the project root with your configuration:
+
+```bash
+# Google Places API Configuration
+GOOGLE_PLACES_API_KEY=your_google_places_api_key_here
+
+# Optional: Additional configuration
+SCRAPER_TIMEOUT=10
+SCRAPER_RATE_LIMIT=1.0
 ```
 
-Without API key, uses mock data for demonstration.
+### **Google Places API Setup**
+
+1. **Get API Key**:
+   - Visit [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+   - Create a new project or select existing one
+   - Enable the following APIs:
+     - Places API
+     - Geocoding API
+   - Create credentials (API Key)
+   - Set restrictions (optional but recommended)
+
+2. **Set Environment Variable**:
+   ```bash
+   export GOOGLE_PLACES_API_KEY="your_actual_api_key_here"
+   ```
+
+3. **Usage in Code**:
+   ```python
+   # Environment variable is automatically loaded
+   service = BreweryDataService()
+   
+   # Or pass explicitly if needed
+   service = BreweryDataService(google_api_key="your_key")
+   ```
+
+**Without API key**: The scraper gracefully falls back to realistic mock data for demonstration purposes.
 
 ### **Rate Limiting**
 - Default 1-second delay between brewery scrapes

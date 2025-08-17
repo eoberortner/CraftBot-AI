@@ -87,6 +87,22 @@ CraftBot-AI/
 - Python 3.11+
 - Node.js 18+
 - npm or yarn
+- **Google Places API Key** (optional, for live brewery data)
+
+### Environment Setup
+
+Create a `.env` file in the project root for API configuration:
+```bash
+# Google Places API (optional - falls back to mock data if not provided)
+GOOGLE_PLACES_API_KEY=your_google_places_api_key_here
+```
+
+**To get a Google Places API key:**
+1. Visit [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
+2. Enable Places API and Geocoding API  
+3. Create an API key and add it to your `.env` file
+
+**Note**: Without an API key, the brewery scraper will use realistic mock data for demonstration.
 
 ### Automated Setup (Recommended)
 
