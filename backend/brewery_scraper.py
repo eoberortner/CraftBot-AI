@@ -17,8 +17,9 @@ from urllib.parse import urljoin, urlparse
 import logging
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file (check both current dir and parent dir)
+load_dotenv()  # Check current directory first
+load_dotenv(dotenv_path="../.env")  # Check parent directory (project root)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -68,7 +69,7 @@ class BreweryFinder:
             )
     
     def find_breweries_by_zipcode(self, zipcode: str, radius_miles: int = 25) -> List[Brewery]:
-        """Find breweries near a given zip code"""
+        """Find breweries near a given zip code using multiple search strategies"""
         # If no API key is available, use mock data
         if not self.api_key:
             logger.info(f"No Google Places API key available, using mock data for zip code: {zipcode}")
@@ -97,36 +98,100 @@ class BreweryFinder:
             location = geocode_data['results'][0]['geometry']['location']
             lat, lng = location['lat'], location['lng']
             
-            # Search for breweries near the coordinates
-            search_url = f"{self.base_url}/nearbysearch/json"
-            search_params = {
-                'location': f'{lat},{lng}',
-                'radius': radius_miles * 1609.34,  # Convert miles to meters
-                'type': 'establishment',
-                'keyword': 'brewery',
-                'key': self.api_key
-            }
+            breweries_found = []
+            brewery_names_seen = set()
             
-            search_response = requests.get(search_url, params=search_params)
-            search_data = search_response.json()
+            # Strategy 1: Nearby search with 'brewery' keyword
+            breweries_found.extend(self._nearby_search_breweries(lat, lng, radius_miles, 'brewery'))
             
-            # Check for API errors
-            if search_data.get('status') == 'REQUEST_DENIED':
-                logger.error(f"Google Places API request denied: {search_data.get('error_message', '')}")
-                return self._get_mock_breweries(zipcode)
+            # Strategy 2: Text search for more comprehensive results
+            text_search_breweries = self._text_search_breweries(zipcode, radius_miles)
             
-            breweries = []
-            for place in search_data.get('results', []):
-                brewery = self._parse_brewery_from_places(place)
-                if brewery:
-                    breweries.append(brewery)
+            # Update the seen names set for nearby search results first
+            for brewery in breweries_found:
+                brewery_names_seen.add(brewery.name.lower())
             
-            logger.info(f"Found {len(breweries)} breweries using Google Places API")
-            return breweries[:10]  # Limit to 10 breweries
+            # Combine results and deduplicate
+            for brewery in text_search_breweries:
+                if brewery.name.lower() not in brewery_names_seen:
+                    breweries_found.append(brewery)
+                    brewery_names_seen.add(brewery.name.lower())
+                
+            logger.info(f"Found {len(breweries_found)} breweries using combined search strategies")
+            return breweries_found[:15]  # Limit to 15 breweries
             
         except Exception as e:
             logger.error(f"Error finding breweries: {e}")
             return self._get_mock_breweries(zipcode)
+    
+    def _nearby_search_breweries(self, lat: float, lng: float, radius_miles: int, keyword: str) -> List[Brewery]:
+        """Search for breweries using nearby search API"""
+        search_url = f"{self.base_url}/nearbysearch/json"
+        search_params = {
+            'location': f'{lat},{lng}',
+            'radius': radius_miles * 1609.34,  # Convert miles to meters
+            'type': 'establishment',
+            'keyword': keyword,
+            'key': self.api_key
+        }
+        
+        search_response = requests.get(search_url, params=search_params)
+        search_data = search_response.json()
+        
+        # Check for API errors
+        if search_data.get('status') == 'REQUEST_DENIED':
+            logger.error(f"Google Places API request denied: {search_data.get('error_message', '')}")
+            return []
+        
+        breweries = []
+        for place in search_data.get('results', []):
+            brewery = self._parse_brewery_from_places(place)
+            if brewery:
+                breweries.append(brewery)
+        
+        logger.info(f"Nearby search found {len(breweries)} breweries")
+        return breweries
+    
+    def _text_search_breweries(self, zipcode: str, radius_miles: int) -> List[Brewery]:
+        """Search for breweries using text search API for more comprehensive results"""
+        breweries = []
+        
+        # Multiple search queries to catch different types of breweries
+        search_queries = [
+            f'brewery {zipcode}',
+            f'brewpub {zipcode}',
+            f'taproom {zipcode}',
+            f'craft beer {zipcode}',
+            f'microbrewery {zipcode}'
+        ]
+        
+        for query in search_queries:
+            try:
+                search_url = f"{self.base_url}/textsearch/json"
+                search_params = {
+                    'query': query,
+                    'key': self.api_key
+                }
+                
+                search_response = requests.get(search_url, params=search_params)
+                search_data = search_response.json()
+                
+                if search_data.get('status') == 'OK':
+                    for place in search_data.get('results', []):
+                        brewery = self._parse_brewery_from_places(place)
+                        if brewery and brewery not in breweries:
+                            breweries.append(brewery)
+                
+                # Rate limiting
+                import time
+                time.sleep(0.1)  # Small delay between requests
+                
+            except Exception as e:
+                logger.warning(f"Error in text search for '{query}': {e}")
+                continue
+        
+        logger.info(f"Text search found {len(breweries)} additional breweries")
+        return breweries
     
     def _parse_brewery_from_places(self, place_data: Dict) -> Optional[Brewery]:
         """Parse brewery data from Google Places API response"""
@@ -135,9 +200,14 @@ class BreweryFinder:
             if not any(keyword in name.lower() for keyword in ['brew', 'tap', 'beer', 'ale', 'lager']):
                 return None
             
+            # Try different address fields
+            address = (place_data.get('formatted_address') or 
+                      place_data.get('vicinity') or 
+                      'Address not available')
+            
             return Brewery(
                 name=name,
-                address=place_data.get('vicinity', ''),
+                address=address,
                 latitude=place_data.get('geometry', {}).get('location', {}).get('lat'),
                 longitude=place_data.get('geometry', {}).get('location', {}).get('lng'),
                 rating=place_data.get('rating'),
