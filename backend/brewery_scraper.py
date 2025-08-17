@@ -146,9 +146,15 @@ class BreweryFinder:
             
             # Sort by distance (closest first)
             breweries_found.sort(key=lambda b: b.distance_miles if b.distance_miles is not None else float('inf'))
+            
+            # Limit to 15 breweries before fetching details (to save API calls)
+            top_breweries = breweries_found[:15]
+            
+            # Fetch detailed information for top breweries only
+            self._enrich_breweries_with_details(top_breweries)
                 
             logger.info(f"Found {len(breweries_found)} breweries using combined search strategies, sorted by distance")
-            return breweries_found[:15]  # Limit to 15 breweries
+            return top_breweries
             
         except Exception as e:
             logger.error(f"Error finding breweries: {e}")
@@ -235,16 +241,91 @@ class BreweryFinder:
                       place_data.get('vicinity') or 
                       'Address not available')
             
-            return Brewery(
+            # Store place_id for later detail enrichment
+            place_id = place_data.get('place_id')
+            
+            brewery = Brewery(
                 name=name,
                 address=address,
                 latitude=place_data.get('geometry', {}).get('location', {}).get('lat'),
                 longitude=place_data.get('geometry', {}).get('location', {}).get('lng'),
-                rating=place_data.get('rating'),
-                website=None  # Will be filled by detail lookup if needed
+                rating=place_data.get('rating')
             )
+            
+            # Store place_id for later detail fetching
+            brewery._place_id = place_id  # Temporary storage
+            
+            return brewery
         except Exception as e:
             logger.error(f"Error parsing brewery data: {e}")
+            return None
+    
+    def _enrich_breweries_with_details(self, breweries: List[Brewery]) -> None:
+        """Fetch detailed information for a list of breweries"""
+        if not self.api_key:
+            logger.info("No API key available, skipping detail enrichment")
+            return
+        
+        logger.info(f"Fetching detailed information for {len(breweries)} breweries...")
+        
+        for i, brewery in enumerate(breweries):
+            if hasattr(brewery, '_place_id') and brewery._place_id:
+                details = self._get_place_details(brewery._place_id)
+                if details:
+                    brewery.website = details.get('website')
+                    brewery.phone = details.get('formatted_phone_number')
+                    brewery.hours = self._format_opening_hours(details.get('opening_hours'))
+                
+                # Remove temporary place_id storage
+                delattr(brewery, '_place_id')
+                
+                # Rate limiting: small delay between API calls
+                if i < len(breweries) - 1:  # Don't delay after the last one
+                    time.sleep(0.1)
+            else:
+                # No place_id available, skip enrichment
+                if hasattr(brewery, '_place_id'):
+                    delattr(brewery, '_place_id')
+    
+    def _get_place_details(self, place_id: str) -> Optional[Dict]:
+        """Get detailed information for a place using Google Places Details API"""
+        try:
+            details_url = f"{self.base_url}/details/json"
+            details_params = {
+                'place_id': place_id,
+                'fields': 'name,website,formatted_phone_number,opening_hours',
+                'key': self.api_key
+            }
+            
+            response = requests.get(details_url, params=details_params)
+            data = response.json()
+            
+            if data.get('status') == 'OK' and data.get('result'):
+                return data['result']
+            else:
+                logger.warning(f"Could not get details for place_id {place_id}: {data.get('status')}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"Error getting place details for {place_id}: {e}")
+            return None
+    
+    def _format_opening_hours(self, opening_hours: Optional[Dict]) -> Optional[str]:
+        """Format opening hours from Google Places API into a readable string"""
+        if not opening_hours or not opening_hours.get('weekday_text'):
+            return None
+        
+        try:
+            # Get the weekday_text which provides nicely formatted hours
+            weekday_text = opening_hours['weekday_text']
+            # Join first 3 days for a concise display, or customize as needed
+            if len(weekday_text) >= 7:
+                # Show Mon-Wed as a sample
+                return f"{weekday_text[0]}, {weekday_text[1]}, {weekday_text[2]}..."
+            else:
+                return "; ".join(weekday_text)
+        except Exception as e:
+            logger.warning(f"Error formatting opening hours: {e}")
             return None
     
     def _get_mock_breweries(self, zipcode: str) -> List[Brewery]:
@@ -524,10 +605,11 @@ class BreweryDataService:
         breweries = self.finder.find_breweries_by_zipcode(zipcode, radius_miles)
         logger.info(f"Found {len(breweries)} breweries")
         
-        # Add mock websites for demonstration
+        # Only add mock websites if no real website was found
         for i, brewery in enumerate(breweries):
             if not brewery.website:
-                brewery.website = f"https://example-brewery-{i+1}.com"
+                # Use a more realistic fallback - many small breweries don't have websites
+                brewery.website = None  # Keep as None instead of fake URL
         
         # Scrape tap lists (with rate limiting)
         for brewery in breweries:
