@@ -90,15 +90,15 @@ class BreweryFinder:
         if not self.api_key:
             logger.warning(
                 "Google Places API key not found. Set GOOGLE_PLACES_API_KEY environment variable "
-                "or pass api_key parameter. Using mock data fallback."
+                "or pass api_key parameter. No brewery data will be available."
             )
     
     def find_breweries_by_zipcode(self, zipcode: str, radius_miles: int = 25) -> List[Brewery]:
         """Find breweries near a given zip code using multiple search strategies"""
-        # If no API key is available, use mock data
+        # If no API key is available, return empty list
         if not self.api_key:
-            logger.info(f"No Google Places API key available, using mock data for zip code: {zipcode}")
-            return self._get_mock_breweries(zipcode)
+            logger.error(f"No Google Places API key available, cannot search for breweries in zip code: {zipcode}")
+            return []
         
         try:
             # First, get coordinates for the zip code
@@ -114,11 +114,11 @@ class BreweryFinder:
             # Check for API errors
             if geocode_data.get('status') == 'REQUEST_DENIED':
                 logger.error(f"Google Places API request denied. Check API key and billing: {geocode_data.get('error_message', '')}")
-                return self._get_mock_breweries(zipcode)
+                return []
             
             if not geocode_data.get('results'):
                 logger.warning(f"Could not find coordinates for zip code: {zipcode}")
-                return self._get_mock_breweries(zipcode)
+                return []
             
             location = geocode_data['results'][0]['geometry']['location']
             lat, lng = location['lat'], location['lng']
@@ -165,7 +165,7 @@ class BreweryFinder:
             
         except Exception as e:
             logger.error(f"Error finding breweries: {e}")
-            return self._get_mock_breweries(zipcode)
+            return []
     
     def _nearby_search_breweries(self, lat: float, lng: float, radius_miles: int, keyword: str) -> List[Brewery]:
         """Search for breweries using nearby search API"""
@@ -335,7 +335,8 @@ class BreweryFinder:
             logger.warning(f"Error formatting opening hours: {e}")
             return None
     
-    def _get_mock_breweries(self, zipcode: str) -> List[Brewery]:
+    # DISABLED: Mock data removed per user request
+    # def _get_mock_breweries(self, zipcode: str) -> List[Brewery]:
         """Return mock brewery data when API is not available"""
         mock_breweries = [
             Brewery(
@@ -440,7 +441,7 @@ class BreweryWebScraper:
         """Scrape tap list from a brewery's website with robust error handling"""
         if not brewery.website:
             logger.warning(f"No website available for {brewery.name}")
-            return self._get_mock_tap_list(brewery.name)
+            return []
         
         # Try multiple strategies to overcome blocking
         strategies = [
@@ -460,9 +461,9 @@ class BreweryWebScraper:
                 logger.debug(f"Strategy {strategy_name} failed for {brewery.name}: {e}")
                 continue
         
-        # All strategies failed, return mock data
-        logger.warning(f"All scraping strategies failed for {brewery.name}, using mock data")
-        return self._get_mock_tap_list(brewery.name)
+        # All strategies failed, return empty list
+        logger.warning(f"All scraping strategies failed for {brewery.name}, no data available")
+        return []
     
     async def _scrape_with_aiohttp(self, url: str, brewery_name: str) -> List[Beer]:
         """Strategy 1: Use aiohttp with enhanced SSL and timeout handling"""
@@ -961,7 +962,8 @@ class BreweryWebScraper:
         
         return True
     
-    def _get_mock_tap_list(self, brewery_name: str) -> List[Beer]:
+    # DISABLED: Mock data removed per user request  
+    # def _get_mock_tap_list(self, brewery_name: str) -> List[Beer]:
         """Return mock tap list data when scraping fails"""
         mock_data = {
             "Golden Gate Brewing Co.": [
