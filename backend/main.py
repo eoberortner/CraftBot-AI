@@ -310,6 +310,46 @@ async def get_market_intelligence(zipcode: str, radius_miles: int = 25):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error generating market intelligence: {str(e)}")
 
+# Cache Management Endpoints
+@app.get("/cache/stats")
+async def get_cache_stats():
+    """Get cache statistics and performance metrics"""
+    try:
+        if hasattr(brewery_data_service, 'cache_service') and brewery_data_service.cache_service:
+            stats = brewery_data_service.cache_service.get_cache_stats()
+            return {
+                "cache_enabled": True,
+                "statistics": stats
+            }
+        else:
+            return {
+                "cache_enabled": False,
+                "message": "Cache service not available"
+            }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting cache stats: {str(e)}")
+
+@app.post("/cache/cleanup")
+async def cleanup_cache():
+    """Clean up expired cache entries"""
+    try:
+        if hasattr(brewery_data_service, 'cache_service') and brewery_data_service.cache_service:
+            brewery_data_service.cache_service.cleanup_expired_cache()
+            return {"message": "Cache cleanup completed successfully"}
+        else:
+            return {"message": "Cache service not available"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error during cache cleanup: {str(e)}")
+
+@app.delete("/cache/clear/{zipcode}")
+async def clear_cache_for_zipcode(zipcode: str):
+    """Clear cache for a specific zip code"""
+    try:
+        # This would require extending the cache service with a clear method
+        return {"message": f"Cache clearing for zipcode {zipcode} - feature to be implemented"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, Float, Integer, Text, ForeignKey, JSON
+from sqlalchemy import Column, String, Float, Integer, Text, ForeignKey, JSON, DateTime
 from sqlalchemy.orm import relationship
+from datetime import datetime
 from database import Base
 
 class BeerStyle(Base):
@@ -51,3 +52,29 @@ class SalesHistory(Base):
     style_name = Column(String)
     units = Column(Integer)
     city = Column(String)
+
+class BrewerySearchCache(Base):
+    __tablename__ = "brewery_search_cache"
+    
+    id = Column(String, primary_key=True)  # Generated key based on zipcode + radius
+    zipcode = Column(String, index=True)
+    radius_miles = Column(Integer)
+    search_results = Column(JSON)  # Cached brewery data
+    created_at = Column(DateTime, default=datetime.utcnow)
+    expires_at = Column(DateTime)  # When this cache entry expires
+    
+class CachedBrewery(Base):
+    __tablename__ = "cached_breweries"
+    
+    id = Column(String, primary_key=True)  # Google place_id
+    name = Column(String, index=True)
+    address = Column(String)
+    phone = Column(String)
+    website = Column(String)
+    latitude = Column(Float)
+    longitude = Column(Float)
+    rating = Column(Float)
+    hours = Column(Text)
+    last_updated = Column(DateTime, default=datetime.utcnow)
+    tap_list = Column(JSON)  # Cached beer list
+    tap_list_updated = Column(DateTime)  # When tap list was last scraped

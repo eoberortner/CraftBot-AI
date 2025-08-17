@@ -593,17 +593,35 @@ class BreweryWebScraper:
 class BreweryDataService:
     """Main service class that combines brewery finding and tap list scraping"""
     
-    def __init__(self, google_api_key: Optional[str] = None):
+    def __init__(self, google_api_key: Optional[str] = None, enable_cache: bool = True):
         self.finder = BreweryFinder(google_api_key)
         self.scraper = BreweryWebScraper()
+        self.cache_enabled = enable_cache
+        self.cache_service = None
+        
+        if enable_cache:
+            try:
+                from brewery_cache import BreweryCacheService
+                self.cache_service = BreweryCacheService()
+                logger.info("Cache service initialized")
+            except ImportError as e:
+                logger.warning(f"Could not initialize cache service: {e}")
+                self.cache_enabled = False
     
     async def get_breweries_with_tap_lists(self, zipcode: str, radius_miles: int = 25) -> List[Brewery]:
         """Get breweries near a zip code with their current tap lists"""
         logger.info(f"Finding breweries near {zipcode}")
         
-        # Find breweries
+        # Try to get from cache first
+        if self.cache_enabled and self.cache_service:
+            cached_breweries = self.cache_service.get_cached_search(zipcode, radius_miles)
+            if cached_breweries:
+                logger.info(f"Returning {len(cached_breweries)} breweries from cache")
+                return cached_breweries
+        
+        # Find breweries from API
         breweries = self.finder.find_breweries_by_zipcode(zipcode, radius_miles)
-        logger.info(f"Found {len(breweries)} breweries")
+        logger.info(f"Found {len(breweries)} breweries from API")
         
         # Only add mock websites if no real website was found
         for i, brewery in enumerate(breweries):
@@ -624,6 +642,10 @@ class BreweryDataService:
             except Exception as e:
                 logger.error(f"Error scraping {brewery.name}: {e}")
                 brewery.beers = []
+        
+        # Cache the results for future use
+        if self.cache_enabled and self.cache_service:
+            self.cache_service.cache_search_results(zipcode, radius_miles, breweries)
         
         return breweries
     
