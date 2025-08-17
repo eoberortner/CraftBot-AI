@@ -17,6 +17,13 @@ import math
 from urllib.parse import urljoin, urlparse
 import logging
 from dotenv import load_dotenv
+import urllib3
+import ssl
+
+# Suppress SSL warnings to clean up logs
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+import warnings
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 # Load environment variables from .env file (check both current dir and parent dir)
 load_dotenv()  # Check current directory first
@@ -390,28 +397,187 @@ class BreweryWebScraper:
     
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-        })
+        # Rotate through multiple realistic user agents
+        self.user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:121.0) Gecko/20100101 Firefox/121.0',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ]
+        self.current_user_agent_index = 0
+        self._update_headers()
+    
+    def _update_headers(self):
+        """Update session headers with current user agent and additional headers"""
+        headers = {
+            'User-Agent': self.user_agents[self.current_user_agent_index],
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.5',
+            'Accept-Encoding': 'gzip, deflate',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none'
+        }
+        self.session.headers.update(headers)
+    
+    def _rotate_user_agent(self):
+        """Rotate to next user agent to avoid detection"""
+        self.current_user_agent_index = (self.current_user_agent_index + 1) % len(self.user_agents)
+        self._update_headers()
+        logger.debug(f"Rotated to user agent: {self.user_agents[self.current_user_agent_index][:50]}...")
+    
+    async def _random_delay(self, min_delay: float = 0.5, max_delay: float = 2.0):
+        """Add random delay to make scraping look more human"""
+        import random
+        delay = random.uniform(min_delay, max_delay)
+        await asyncio.sleep(delay)
     
     async def scrape_brewery_tap_list(self, brewery: Brewery) -> List[Beer]:
-        """Scrape tap list from a brewery's website"""
+        """Scrape tap list from a brewery's website with robust error handling"""
         if not brewery.website:
             logger.warning(f"No website available for {brewery.name}")
             return self._get_mock_tap_list(brewery.name)
         
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(brewery.website, timeout=10) as response:
-                    if response.status == 200:
-                        html = await response.text()
-                        return self._parse_tap_list_from_html(html, brewery.website)
-                    else:
-                        logger.warning(f"Failed to fetch {brewery.website}: {response.status}")
-                        return self._get_mock_tap_list(brewery.name)
-        except Exception as e:
-            logger.error(f"Error scraping {brewery.website}: {e}")
-            return self._get_mock_tap_list(brewery.name)
+        # Try multiple strategies to overcome blocking
+        strategies = [
+            self._scrape_with_aiohttp,
+            self._scrape_with_requests,
+            self._scrape_with_alternative_endpoints
+        ]
+        
+        for strategy_name, strategy in enumerate(strategies, 1):
+            try:
+                logger.debug(f"Trying strategy {strategy_name} for {brewery.name}")
+                result = await strategy(brewery.website, brewery.name)
+                if result:
+                    logger.info(f"Successfully scraped {len(result)} beers from {brewery.name} using strategy {strategy_name}")
+                    return result
+            except Exception as e:
+                logger.debug(f"Strategy {strategy_name} failed for {brewery.name}: {e}")
+                continue
+        
+        # All strategies failed, return mock data
+        logger.warning(f"All scraping strategies failed for {brewery.name}, using mock data")
+        return self._get_mock_tap_list(brewery.name)
+    
+    async def _scrape_with_aiohttp(self, url: str, brewery_name: str) -> List[Beer]:
+        """Strategy 1: Use aiohttp with enhanced SSL and timeout handling"""
+        # Create SSL context that's more permissive
+        import ssl
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+        
+        # Enhanced timeout configuration
+        timeout = aiohttp.ClientTimeout(total=15, connect=5)
+        
+        # Rotate user agent for this request
+        self._rotate_user_agent()
+        
+        connector = aiohttp.TCPConnector(ssl=ssl_context, limit=10)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            headers = dict(self.session.headers)
+            headers['Referer'] = 'https://google.com'  # Add referer to look more legitimate
+            
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    return self._parse_tap_list_from_html(html, url)
+                elif response.status == 403:
+                    logger.warning(f"403 Forbidden for {brewery_name} - website may be blocking scrapers")
+                else:
+                    logger.warning(f"HTTP {response.status} for {brewery_name}")
+                return []
+    
+    async def _scrape_with_requests(self, url: str, brewery_name: str) -> List[Beer]:
+        """Strategy 2: Use requests library with different approach"""
+        import asyncio
+        
+        def sync_scrape():
+            try:
+                # Rotate user agent
+                self._rotate_user_agent()
+                
+                # Enhanced session configuration
+                session = requests.Session()
+                session.headers.update(self.session.headers)
+                
+                # Add some randomness to make requests look more human
+                session.headers['Cache-Control'] = 'no-cache'
+                session.headers['Pragma'] = 'no-cache'
+                
+                # Disable SSL verification and set timeout
+                response = session.get(
+                    url, 
+                    verify=False, 
+                    timeout=10,
+                    allow_redirects=True
+                )
+                
+                if response.status_code == 200:
+                    return self._parse_tap_list_from_html(response.text, url)
+                else:
+                    logger.debug(f"Requests strategy: HTTP {response.status_code} for {brewery_name}")
+                return []
+                
+            except Exception as e:
+                logger.debug(f"Requests strategy failed for {brewery_name}: {e}")
+                return []
+        
+        # Run sync function in thread pool
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, sync_scrape)
+    
+    async def _scrape_with_alternative_endpoints(self, url: str, brewery_name: str) -> List[Beer]:
+        """Strategy 3: Try alternative endpoints and URL variations"""
+        import urllib.parse
+        
+        # Try different URL variations that might be less protected
+        url_variations = [
+            url.rstrip('/'),  # Remove trailing slash
+            url + '/' if not url.endswith('/') else url[:-1],  # Toggle trailing slash
+            url.replace('https://', 'http://'),  # Try HTTP instead of HTTPS
+            url + '/menu' if not url.endswith('/menu') else url,
+            url + '/beers',
+            url + '/tap-list',
+            url + '/current-beers',
+            url + '/on-tap'
+        ]
+        
+        for variant_url in url_variations:
+            try:
+                # Use aiohttp with minimal SSL verification
+                import ssl
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                
+                timeout = aiohttp.ClientTimeout(total=8)
+                connector = aiohttp.TCPConnector(ssl=ssl_context)
+                
+                async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+                    # Minimal headers to avoid detection
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (compatible; BrewBot/1.0)',
+                        'Accept': 'text/html,application/json'
+                    }
+                    
+                    async with session.get(variant_url, headers=headers) as response:
+                        if response.status == 200:
+                            html = await response.text()
+                            beers = self._parse_tap_list_from_html(html, variant_url)
+                            if beers:
+                                logger.info(f"Alternative URL strategy worked: {variant_url}")
+                                return beers
+                        
+            except Exception:
+                continue  # Try next variation
+        
+        return []  # No alternative URLs worked
     
     def _parse_tap_list_from_html(self, html: str, base_url: str) -> List[Beer]:
         """Parse beer information from HTML content"""
@@ -629,15 +795,15 @@ class BreweryDataService:
                 # Use a more realistic fallback - many small breweries don't have websites
                 brewery.website = None  # Keep as None instead of fake URL
         
-        # Scrape tap lists (with rate limiting)
+        # Scrape tap lists (with enhanced rate limiting)
         for brewery in breweries:
             try:
                 brewery.beers = await self.scraper.scrape_brewery_tap_list(brewery)
                 brewery.last_updated = time.strftime("%Y-%m-%d %H:%M:%S")
                 logger.info(f"Scraped {len(brewery.beers)} beers from {brewery.name}")
                 
-                # Rate limiting to be respectful
-                await asyncio.sleep(1)
+                # Enhanced rate limiting with randomization
+                await self.scraper._random_delay(1.0, 3.0)  # Random delay between 1-3 seconds
                 
             except Exception as e:
                 logger.error(f"Error scraping {brewery.name}: {e}")

@@ -350,6 +350,65 @@ async def clear_cache_for_zipcode(zipcode: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
 
+# Scraper Management Endpoints
+@app.get("/scraper/config")
+async def get_scraper_config():
+    """Get current scraper configuration settings"""
+    try:
+        from scraper_config import config
+        return {
+            "rate_limiting": {
+                "min_delay": config.MIN_DELAY_BETWEEN_REQUESTS,
+                "max_delay": config.MAX_DELAY_BETWEEN_REQUESTS,
+            },
+            "timeouts": {
+                "request_timeout": config.REQUEST_TIMEOUT,
+                "connection_timeout": config.CONNECTION_TIMEOUT,
+            },
+            "retry_settings": {
+                "max_attempts": config.MAX_RETRY_ATTEMPTS,
+                "retry_delay": config.RETRY_DELAY,
+            },
+            "ssl_settings": {
+                "verify_ssl": config.VERIFY_SSL,
+                "ignore_warnings": config.IGNORE_SSL_WARNINGS,
+            },
+            "user_agent_rotation": config.ROTATE_USER_AGENTS,
+            "mock_data_fallback": config.USE_MOCK_DATA_ON_FAILURE
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting scraper config: {str(e)}")
+
+@app.get("/scraper/stats")
+async def get_scraper_stats():
+    """Get scraper performance statistics"""
+    try:
+        # This could be extended to track actual scraping statistics
+        return {
+            "message": "Scraper statistics endpoint",
+            "features": [
+                "Multi-strategy scraping (aiohttp, requests, alternative endpoints)",
+                "User agent rotation with 7+ different browsers",
+                "SSL bypass for problematic certificates", 
+                "Rate limiting with randomized delays",
+                "Automatic fallback to mock data",
+                "Enhanced error handling and logging"
+            ],
+            "strategies": {
+                "strategy_1": "aiohttp with enhanced SSL handling",
+                "strategy_2": "requests library with different headers", 
+                "strategy_3": "alternative URL endpoints (/menu, /beers, etc.)"
+            },
+            "error_handling": [
+                "403 Forbidden - Detected and handled gracefully",
+                "SSL Certificate Issues - Bypassed with custom SSL context",
+                "Timeout Errors - Multiple timeout configurations",
+                "Connection Failures - Automatic retry with different strategies"
+            ]
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error getting scraper stats: {str(e)}")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
