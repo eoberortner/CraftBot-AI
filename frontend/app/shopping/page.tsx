@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { ShoppingCart, ExternalLink, Copy, CheckCircle } from 'lucide-react'
 import Navigation from '../components/Navigation'
+import { BEER_STYLES, getBeerStyleById } from '../utils/beerStyles'
 
 interface ShoppingItem {
   name: string
@@ -32,68 +33,19 @@ export default function ShoppingList() {
   }, [])
 
   const getMockRecipes = () => {
-    return [
-      {
-        id: "west-coast-ipa",
-        name: "West Coast IPA",
-        style: "American IPA",
-        abv: 6.8,
-        ibu: 65,
-        srm: 7,
-        batch_size: 5,
-        description: "Hoppy, bitter, and citrusy with a clean finish"
-      },
-      {
-        id: "pale-ale",
-        name: "American Pale Ale",
-        style: "American Pale Ale", 
-        abv: 5.2,
-        ibu: 38,
-        srm: 5,
-        batch_size: 5,
-        description: "Balanced malt and hop character with citrus notes"
-      },
-      {
-        id: "stout",
-        name: "Dry Irish Stout",
-        style: "Irish Stout",
-        abv: 4.5,
-        ibu: 42,
-        srm: 35,
-        batch_size: 5,
-        description: "Roasted barley character with coffee and chocolate notes"
-      },
-      {
-        id: "wheat-beer",
-        name: "American Wheat Beer",
-        style: "American Wheat Beer",
-        abv: 4.8,
-        ibu: 15,
-        srm: 3,
-        batch_size: 5,
-        description: "Light, refreshing wheat beer with citrus hop character"
-      },
-      {
-        id: "brown-ale",
-        name: "English Brown Ale",
-        style: "English Brown Ale",
-        abv: 5.0,
-        ibu: 25,
-        srm: 18,
-        batch_size: 5,
-        description: "Malty, nutty, and caramel-forward with mild hop balance"
-      },
-      {
-        id: "saison",
-        name: "Belgian Saison",
-        style: "Saison",
-        abv: 6.2,
-        ibu: 28,
-        srm: 6,
-        batch_size: 5,
-        description: "Spicy, fruity, and dry with complex yeast character"
-      }
-    ]
+    // Generate recipes from our standardized beer styles
+    return BEER_STYLES.map(style => ({
+      id: style.id,
+      name: style.name,
+      style: style.name,
+      abv: Math.round(((style.abv_range[0] + style.abv_range[1]) / 2) * 10) / 10, // Average ABV, rounded
+      ibu: Math.round((style.ibu_range[0] + style.ibu_range[1]) / 2), // Average IBU  
+      srm: Math.round((style.srm_range[0] + style.srm_range[1]) / 2), // Average SRM
+      batch_size: 5, // Standard 5 gallon batch
+      description: style.description,
+      difficulty: style.difficulty,
+      characteristics: style.characteristics
+    }))
   }
 
   const fetchRecipes = async () => {

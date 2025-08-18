@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { Clock, Thermometer, AlertTriangle, CheckCircle, Play, Pause, RotateCcw } from 'lucide-react'
 import Navigation from '../components/Navigation'
+import { BEER_STYLES, BEER_STYLE_NAMES, getBeerStyleById } from '../utils/beerStyles'
 
 interface BrewingStep {
   step_number: number
@@ -35,16 +36,8 @@ export default function BrewingGuide() {
   const [timeRemaining, setTimeRemaining] = useState(0)
   const [loading, setLoading] = useState(false)
 
-  const beerStyles = [
-    'West Coast IPA',
-    'Stout',
-    'Pilsner',
-    'Wheat Beer',
-    'Pale Ale',
-    'Amber Ale',
-    'Brown Ale',
-    'Porter'
-  ]
+  // Use standardized beer styles
+  const beerStyles = BEER_STYLE_NAMES
 
   useEffect(() => {
     let interval: NodeJS.Timeout
@@ -62,8 +55,14 @@ export default function BrewingGuide() {
     return () => clearInterval(interval)
   }, [isTimerRunning, timeRemaining])
 
-  // Mock brewing guide data
+  // Mock brewing guide data based on standardized beer styles
   const getMockBrewingGuide = (styleName: string, batchSize: number, method: string): BrewingGuide => {
+    // Get the beer style data for more specific instructions
+    const styleData = BEER_STYLES.find(s => s.name === styleName)
+    const fermentationTemp = styleData ? 
+      `${styleData.fermentation_temp[0]}°F - ${styleData.fermentation_temp[1]}°F (${Math.round((styleData.fermentation_temp[0] - 32) * 5/9)}°C - ${Math.round((styleData.fermentation_temp[1] - 32) * 5/9)}°C)` :
+      '65°F - 72°F (18°C - 22°C)'
+      
     const baseSteps = {
       'West Coast IPA': [
         {
@@ -504,7 +503,9 @@ export default function BrewingGuide() {
                 >
                   <option value="">Select a style</option>
                   {beerStyles.map((style) => (
-                    <option key={style} value={style}>{style}</option>
+                    <option key={style.id} value={style.name}>
+                      {style.name} ({style.difficulty})
+                    </option>
                   ))}
                 </select>
               </div>

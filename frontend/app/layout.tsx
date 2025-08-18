@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import './globals.css'
 import ClientLayout from './components/ClientLayout'
+import ErrorBoundary from './components/ErrorBoundary'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -19,7 +20,9 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <div className="min-h-screen bg-gradient-to-br from-amber-50 to-orange-100">
-          <ClientLayout>{children}</ClientLayout>
+          <ErrorBoundary>
+            <ClientLayout>{children}</ClientLayout>
+          </ErrorBoundary>
         </div>
       </body>
     </html>

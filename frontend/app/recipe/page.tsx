@@ -1,8 +1,9 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calculator, Plus, Trash2, CheckCircle, XCircle, AlertTriangle } from 'lucide-react'
+import { Calculator, Plus, Trash2, CheckCircle, XCircle, AlertTriangle, ShoppingCart, Beer } from 'lucide-react'
 import Navigation from '../components/Navigation'
+import { BEER_STYLES, BEER_STYLE_NAMES, getBeerStyleById, formatAbvRange, formatIbuRange, formatSrmRange } from '../utils/beerStyles'
 
 interface GrainIngredient {
   name: string
@@ -56,16 +57,8 @@ export default function RecipeBuilder() {
   const [analysis, setAnalysis] = useState<RecipeAnalysis | null>(null)
   const [loading, setLoading] = useState(false)
 
-  const beerStyles = [
-    'West Coast IPA',
-    'Stout',
-    'Pilsner',
-    'Wheat Beer',
-    'Pale Ale',
-    'Amber Ale',
-    'Brown Ale',
-    'Porter'
-  ]
+  // Use standardized beer styles
+  const beerStyles = BEER_STYLE_NAMES
 
   const availableGrains = [
     { name: '2-Row Pale Malt', color_lovibond: 2, potential_ppg: 37 },
@@ -169,11 +162,21 @@ export default function RecipeBuilder() {
       <Navigation title="Recipe Builder" />
       <div className="p-8">
         <div className="max-w-6xl mx-auto">
-          {/* Header */}
+          {/* Header with Workflow */}
           <div className="text-center mb-8">
+            <div className="flex items-center justify-center space-x-2 text-sm text-gray-600 mb-4">
+              <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full font-medium">① Plan</span>
+              <span className="text-gray-400">→</span>
+              <span className="text-gray-400">② Shop</span>
+              <span className="text-gray-400">→</span>
+              <span className="text-gray-400">③ Brew</span>
+            </div>
             <h1 className="text-4xl font-bold text-gray-800 mb-4">Recipe Builder</h1>
-          <p className="text-lg text-gray-600">Create and analyze recipes with live ABV/IBU/SRM calculations</p>
-        </div>
+            <p className="text-lg text-gray-600">Create and analyze recipes with live ABV/IBU/SRM calculations</p>
+            <p className="text-gray-500 mt-2">
+              Design your recipe and calculate brewing parameters. Once satisfied, generate a shopping list and then follow the brewing guide.
+            </p>
+          </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Recipe Form */}
@@ -201,10 +204,54 @@ export default function RecipeBuilder() {
                   >
                     <option value="">Select a style</option>
                     {beerStyles.map((style) => (
-                      <option key={style} value={style}>{style}</option>
+                      <option key={style.id} value={style.name}>
+                        {style.name} ({style.difficulty})
+                      </option>
                     ))}
                   </select>
                 </div>
+
+                {/* Style Information Panel */}
+                {selectedStyle && (
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                    {(() => {
+                      const style = BEER_STYLES.find(s => s.name === selectedStyle)
+                      if (!style) return null
+                      
+                      return (
+                        <div>
+                          <h4 className="font-medium text-blue-900 mb-2">{style.name} Style Guide</h4>
+                          <p className="text-blue-800 text-sm mb-3">{style.description}</p>
+                          <div className="grid grid-cols-2 md:grid-cols-3 gap-3 text-xs">
+                            <div>
+                              <span className="font-medium text-blue-700">ABV:</span>
+                              <div className="text-blue-600">{formatAbvRange(style)}</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-blue-700">IBU:</span>
+                              <div className="text-blue-600">{formatIbuRange(style)}</div>
+                            </div>
+                            <div>
+                              <span className="font-medium text-blue-700">SRM:</span>
+                              <div className="text-blue-600">{formatSrmRange(style)}</div>
+                            </div>
+                          </div>
+                          <div className="mt-3">
+                            <span className="font-medium text-blue-700 text-xs">Characteristics:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {style.characteristics.map((char, idx) => (
+                                <span key={idx} className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs">
+                                  {char}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
+
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-2">Batch Size (L)</label>
                   <input
@@ -484,6 +531,35 @@ export default function RecipeBuilder() {
                           </li>
                         ))}
                       </ul>
+                    </div>
+                  )}
+
+                  {/* Workflow Navigation */}
+                  {analysis && (
+                    <div className="border-t border-gray-200 pt-6 mt-6">
+                      <h3 className="font-semibold text-gray-800 mb-4">Next Steps in Your Brewing Journey</h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <a 
+                          href="/shopping" 
+                          className="flex items-center p-4 bg-purple-50 border border-purple-200 rounded-lg hover:bg-purple-100 transition-colors"
+                        >
+                          <ShoppingCart className="w-6 h-6 text-purple-600 mr-3" />
+                          <div>
+                            <div className="font-medium text-purple-800">② Generate Shopping List</div>
+                            <div className="text-sm text-purple-600">Get ingredient list for this recipe</div>
+                          </div>
+                        </a>
+                        <a 
+                          href="/brew" 
+                          className="flex items-center p-4 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors"
+                        >
+                          <Beer className="w-6 h-6 text-blue-600 mr-3" />
+                          <div>
+                            <div className="font-medium text-blue-800">③ Follow Brewing Guide</div>
+                            <div className="text-sm text-blue-600">Step-by-step brewing instructions</div>
+                          </div>
+                        </a>
+                      </div>
                     </div>
                   )}
                 </div>

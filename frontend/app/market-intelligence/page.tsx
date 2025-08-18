@@ -1,537 +1,490 @@
 'use client'
 
-import { useState } from 'react'
-import { Search, MapPin, Star, DollarSign, TrendingUp, BarChart3, Beer, ExternalLink } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { Search, MapPin, TrendingUp, BarChart3, Users, DollarSign, Loader2, RefreshCw, Download, AlertCircle, ChevronDown, ChevronUp } from 'lucide-react'
 import Navigation from '../components/Navigation'
-
-interface Beer {
-  name: string
-  style?: string
-  abv?: number
-  ibu?: number
-  description?: string
-  price?: string
-  availability: string
-}
+import ErrorDisplay, { classifyError } from '../components/ErrorDisplay'
+import LoadingState, { BreweryListSkeleton, ChartSkeleton } from '../components/LoadingState'
+import { breweryApi, cacheApi, withRetry } from '../utils/apiClient'
 
 interface Brewery {
   name: string
   address: string
   phone?: string
   website?: string
-  latitude?: number
-  longitude?: number
   rating?: number
   hours?: string
-  beers: Beer[]
-  last_updated?: string
+  distance_miles?: number
+  tap_list?: Beer[]
 }
 
-interface BrewerySearchResult {
-  zipcode: string
-  radius_miles: number
+interface Beer {
+  name: string
+  style: string
+  abv: number
+  ibu?: number
+  description?: string
+  price?: string
+}
+
+interface MarketData {
   total_breweries: number
-  breweries: Brewery[]
+  total_beers: number
+  avg_abv: number
+  popular_styles: { style: string; count: number; percentage: number }[]
+  price_analysis: { avg_price: number; price_range: string }
+  market_trends: {
+    ipa_dominance: number
+    craft_density: number
+    innovation_score: number
+  }
 }
 
 interface TapAnalysis {
-  area: string
-  summary: {
-    total_breweries: number
-    total_beers: number
-    unique_styles: number
-    average_abv?: number
-    average_ibu?: number
-  }
-  top_styles: Array<{ style: string; count: number }>
-  breweries_analyzed: number
-}
-
-interface MarketIntelligence {
-  market_area: string
-  competitive_landscape: {
-    total_competitors: number
-    average_brewery_rating?: number
-    breweries_with_pricing: number
-  }
-  pricing_intelligence: {
-    average_beer_price?: number
-    price_range: {
-      min?: number
-      max?: number
-    }
-    pricing_by_style: Record<string, number>
-  }
-  style_trends: Array<[string, number]>
-  recommendations: string[]
+  brewery_name: string
+  total_taps: number
+  style_diversity: number
+  avg_abv: number
+  unique_styles: string[]
+  competitive_score: number
 }
 
 export default function MarketIntelligence() {
   const [zipcode, setZipcode] = useState('')
-  const [radius, setRadius] = useState(25)
-  const [searchResult, setSearchResult] = useState<BrewerySearchResult | null>(null)
-  const [tapAnalysis, setTapAnalysis] = useState<TapAnalysis | null>(null)
-  const [marketIntelligence, setMarketIntelligence] = useState<MarketIntelligence | null>(null)
+  const [breweries, setBreweries] = useState<Brewery[]>([])
+  const [marketData, setMarketData] = useState<MarketData | null>(null)
+  const [tapAnalysis, setTapAnalysis] = useState<TapAnalysis[]>([])
   const [loading, setLoading] = useState(false)
-  const [activeTab, setActiveTab] = useState<'breweries' | 'analysis' | 'intelligence'>('breweries')
+  const [error, setError] = useState<string | null>(null)
+  const [selectedBrewery, setSelectedBrewery] = useState<Brewery | null>(null)
+  const [showBreweryDetails, setShowBreweryDetails] = useState<{ [key: string]: boolean }>({})
 
   const searchBreweries = async () => {
-    if (!zipcode) return
+    if (!zipcode.trim()) {
+      setError('Please enter a valid zip code')
+      return
+    }
 
     setLoading(true)
+    setError(null)
+    
     try {
-      // Search breweries
-      const breweriesResponse = await fetch(`http://localhost:8000/breweries/search/${zipcode}?radius_miles=${radius}`)
-      if (breweriesResponse.ok) {
-        const breweriesData = await breweriesResponse.json()
-        setSearchResult(breweriesData)
+      // Search breweries with retry logic
+      const breweryResponse = await withRetry(() => breweryApi.searchBreweries(zipcode, 25), 2)
+      
+      if (!breweryResponse.success) {
+        setError(breweryResponse.error || 'Failed to search breweries')
+        setBreweries([])
+        setMarketData(null)
+        setTapAnalysis([])
+        return
+      }
+      
+      const breweryData = breweryResponse.data as any
+      
+      if (!breweryData?.breweries || breweryData.breweries.length === 0) {
+        setError(`No breweries found in zip code ${zipcode}. Try a different area or check if your Google Places API key is configured.`)
+        setBreweries([])
+        setMarketData(null)
+        setTapAnalysis([])
+        return
       }
 
-      // Get tap analysis
-      const analysisResponse = await fetch(`http://localhost:8000/breweries/tap-analysis/${zipcode}?radius_miles=${radius}`)
-      if (analysisResponse.ok) {
-        const analysisData = await analysisResponse.json()
-        setTapAnalysis(analysisData)
+      setBreweries(breweryData.breweries)
+
+      // Get market intelligence (parallel requests)
+      const [marketResponse, tapResponse] = await Promise.allSettled([
+        breweryApi.getMarketIntelligence(zipcode, 25),
+        breweryApi.getTapAnalysis(zipcode, 25)
+      ])
+
+      // Handle market intelligence
+      if (marketResponse.status === 'fulfilled' && marketResponse.value.success) {
+        setMarketData(marketResponse.value.data as MarketData)
+      } else {
+        console.warn('Market intelligence failed:', marketResponse.status === 'fulfilled' ? marketResponse.value.error : marketResponse.reason)
       }
 
-      // Get market intelligence
-      const intelligenceResponse = await fetch(`http://localhost:8000/breweries/market-intelligence/${zipcode}?radius_miles=${radius}`)
-      if (intelligenceResponse.ok) {
-        const intelligenceData = await intelligenceResponse.json()
-        setMarketIntelligence(intelligenceData)
+      // Handle tap analysis
+      if (tapResponse.status === 'fulfilled' && tapResponse.value.success) {
+        setTapAnalysis((tapResponse.value.data as any)?.analysis || [])
+      } else {
+        console.warn('Tap analysis failed:', tapResponse.status === 'fulfilled' ? tapResponse.value.error : tapResponse.reason)
       }
 
-    } catch (error) {
-      console.error('Error searching breweries:', error)
-      // Mock data fallback
-      setSearchResult({
-        zipcode: zipcode,
-        radius_miles: radius,
-        total_breweries: 3,
-        breweries: getMockBreweries()
-      })
-      setTapAnalysis(getMockTapAnalysis())
-      setMarketIntelligence(getMockMarketIntelligence())
+    } catch (err) {
+      console.error('Search error:', err)
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred while searching breweries.')
+      setBreweries([])
+      setMarketData(null)
+      setTapAnalysis([])
     } finally {
       setLoading(false)
     }
   }
 
-  const getMockBreweries = (): Brewery[] => [
-    {
-      name: "Golden Gate Brewing Co.",
-      address: "123 Main St, San Francisco, CA 94102",
-      phone: "(415) 555-0123",
-      website: "https://goldengatebrew.com",
-      rating: 4.5,
-      hours: "Mon-Thu: 4-10pm, Fri-Sat: 2-11pm, Sun: 2-9pm",
-      beers: [
-        { name: "Golden Gate IPA", style: "American IPA", abv: 6.5, ibu: 65, description: "Citrusy and hoppy", price: "$8", availability: "On Tap" },
-        { name: "Fog City Lager", style: "German Lager", abv: 4.8, ibu: 22, description: "Clean and crisp", price: "$7", availability: "On Tap" },
-        { name: "Bridge Stout", style: "Imperial Stout", abv: 8.2, ibu: 45, description: "Rich and roasted", price: "$9", availability: "On Tap" }
-      ]
-    },
-    {
-      name: "Craft Corner Brewery",
-      address: "456 Beer Ave, San Francisco, CA 94103",
-      phone: "(415) 555-0456",
-      website: "https://craftcorner.com",
-      rating: 4.2,
-      hours: "Daily: 12-10pm",
-      beers: [
-        { name: "Corner Stone Pale Ale", style: "American Pale Ale", abv: 5.2, ibu: 38, description: "Balanced malt and hop", price: "$7", availability: "On Tap" },
-        { name: "Hoppy Corner IPA", style: "West Coast IPA", abv: 7.1, ibu: 72, description: "Aggressively hopped", price: "$8", availability: "On Tap" }
-      ]
-    },
-    {
-      name: "Hop Heaven Taphouse",
-      address: "789 IPA Lane, San Francisco, CA 94104",
-      phone: "(415) 555-0789",
-      website: "https://hopheaven.beer",
-      rating: 4.7,
-      hours: "Mon-Wed: 3-10pm, Thu-Sat: 12-11pm, Sun: 12-9pm",
-      beers: [
-        { name: "Heaven's Gate IPA", style: "Double IPA", abv: 8.5, ibu: 95, description: "Massive hop flavor", price: "$10", availability: "On Tap" },
-        { name: "Heavenly Haze", style: "Hazy IPA", abv: 6.8, ibu: 45, description: "Juicy and smooth", price: "$9", availability: "On Tap" }
-      ]
-    }
-  ]
-
-  const getMockTapAnalysis = (): TapAnalysis => ({
-    area: `${zipcode} (${radius} mile radius)`,
-    summary: {
-      total_breweries: 3,
-      total_beers: 7,
-      unique_styles: 6,
-      average_abv: 6.4,
-      average_ibu: 50.7
-    },
-    top_styles: [
-      { style: "American IPA", count: 2 },
-      { style: "West Coast IPA", count: 1 },
-      { style: "Double IPA", count: 1 },
-      { style: "Hazy IPA", count: 1 },
-      { style: "American Pale Ale", count: 1 },
-      { style: "German Lager", count: 1 }
-    ],
-    breweries_analyzed: 3
-  })
-
-  const getMockMarketIntelligence = (): MarketIntelligence => ({
-    market_area: `${zipcode} (${radius} mile radius)`,
-    competitive_landscape: {
-      total_competitors: 3,
-      average_brewery_rating: 4.5,
-      breweries_with_pricing: 3
-    },
-    pricing_intelligence: {
-      average_beer_price: 8.14,
-      price_range: { min: 7, max: 10 },
-      pricing_by_style: {
-        "American IPA": 8.5,
-        "West Coast IPA": 8.0,
-        "Double IPA": 10.0,
-        "Hazy IPA": 9.0,
-        "American Pale Ale": 7.0,
-        "German Lager": 7.0,
-        "Imperial Stout": 9.0
+  const refreshData = async () => {
+    if (!zipcode.trim()) return
+    
+    setLoading(true)
+    try {
+      // Clear cache for this zipcode
+      const clearResponse = await cacheApi.clearZipcode(zipcode)
+      if (!clearResponse.success) {
+        console.warn('Failed to clear cache:', clearResponse.error)
       }
-    },
-    style_trends: [
-      ["American IPA", 2],
-      ["West Coast IPA", 1],
-      ["Double IPA", 1],
-      ["Hazy IPA", 1],
-      ["American Pale Ale", 1]
-    ],
-    recommendations: [
-      "Consider pricing IPAs competitively with local market average",
-      "Unique styles may command premium pricing",
-      "Focus on styles popular in your market area"
-    ]
-  })
+      
+      // Re-search with fresh data
+      await searchBreweries()
+    } catch (err) {
+      console.error('Refresh error:', err)
+      setError('Failed to refresh data. Please try again.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const exportData = () => {
+    const exportData = {
+      zipcode,
+      search_date: new Date().toISOString(),
+      market_summary: marketData,
+      breweries: breweries.map(b => ({
+        name: b.name,
+        address: b.address,
+        distance_miles: b.distance_miles,
+        rating: b.rating,
+        beer_count: b.tap_list?.length || 0,
+        website: b.website
+      })),
+      tap_analysis: tapAnalysis
+    }
+
+    const blob = new Blob([JSON.stringify(exportData, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `market-intelligence-${zipcode}-${new Date().toISOString().split('T')[0]}.json`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+  }
+
+  const toggleBreweryDetails = (breweryName: string) => {
+    setShowBreweryDetails(prev => ({
+      ...prev,
+      [breweryName]: !prev[breweryName]
+    }))
+  }
+
+  const getCompetitiveInsight = (brewery: Brewery): string => {
+    if (!brewery.tap_list || brewery.tap_list.length === 0) {
+      return "No tap data available for competitive analysis"
+    }
+
+    const beerCount = brewery.tap_list.length
+    const avgAbv = brewery.tap_list.reduce((sum, beer) => sum + beer.abv, 0) / beerCount
+    const uniqueStyles = new Set(brewery.tap_list.map(beer => beer.style)).size
+
+    if (beerCount >= 10 && uniqueStyles >= 5) {
+      return "🟢 Strong competitor - High variety and extensive tap list"
+    } else if (beerCount >= 6 && uniqueStyles >= 3) {
+      return "🟡 Moderate competitor - Good selection with room for growth"
+    } else {
+      return "🔴 Limited competitor - Focused selection or limited data"
+    }
+  }
 
   return (
-    <div className="min-h-screen">
+    <div className="min-h-screen bg-gray-50">
       <Navigation title="Market Intelligence" />
-      <div className="p-8">
-        <div className="max-w-7xl mx-auto">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <h1 className="text-4xl font-bold text-gray-800 mb-4">Market Intelligence</h1>
-            <p className="text-lg text-gray-600">Analyze local brewery competition and tap trends</p>
-          </div>
+      
+      <div className="container mx-auto px-4 py-8">
+        {/* Search Section */}
+        <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+          <h1 className="text-2xl font-bold text-gray-800 mb-6 flex items-center">
+            <Search className="w-8 h-8 mr-3 text-blue-600" />
+            Local Brewery Market Analysis
+          </h1>
+          
+          <div className="flex gap-4 items-end">
+            <div className="flex-1">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
+                Zip Code
+              </label>
+              <input
+                type="text"
+                value={zipcode}
+                onChange={(e) => setZipcode(e.target.value)}
+                placeholder="Enter zip code (e.g., 94556)"
+                className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                onKeyPress={(e) => e.key === 'Enter' && searchBreweries()}
+              />
+            </div>
+            
+            <button
+              onClick={searchBreweries}
+              disabled={loading}
+              className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+              ) : (
+                <Search className="w-4 h-4 mr-2" />
+              )}
+              {loading ? 'Analyzing...' : 'Analyze Market'}
+            </button>
 
-          {/* Search Form */}
-          <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
-            <h2 className="text-2xl font-semibold text-gray-800 mb-4">Search Local Market</h2>
-            <div className="flex space-x-4">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Zip Code
-                </label>
-                <input
-                  type="text"
-                  value={zipcode}
-                  onChange={(e) => setZipcode(e.target.value)}
-                  placeholder="Enter zip code (e.g., 94102)"
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
+            {breweries.length > 0 && (
+              <button
+                onClick={refreshData}
+                disabled={loading}
+                className="px-4 py-2 bg-gray-600 text-white rounded-lg hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center"
+                title="Refresh data (clears cache)"
+              >
+                <RefreshCw className="w-4 h-4" />
+              </button>
+            )}
+
+            {marketData && (
+              <button
+                onClick={exportData}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 flex items-center"
+                title="Export market data"
+              >
+                <Download className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Error Display */}
+        {error && (
+          <ErrorDisplay
+            error={error}
+            type={classifyError(error)}
+            onRetry={searchBreweries}
+            className="mb-6"
+            showDetails={true}
+          />
+        )}
+
+        {/* Loading State */}
+        {loading && (
+          <div className="space-y-6">
+            <LoadingState 
+              type="search"
+              message="Searching breweries and analyzing market data..."
+              size="lg"
+              className="bg-white rounded-lg shadow-lg"
+            />
+            <ChartSkeleton />
+            <BreweryListSkeleton />
+          </div>
+        )}
+
+        {/* Market Overview */}
+        {!loading && marketData && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Market Size</p>
+                  <p className="text-2xl font-bold text-gray-900">{marketData.total_breweries}</p>
+                  <p className="text-xs text-gray-500">Breweries Found</p>
+                </div>
+                <MapPin className="w-8 h-8 text-blue-500" />
               </div>
-              <div className="w-48">
-                <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Radius (miles)
-                </label>
-                <select
-                  value={radius}
-                  onChange={(e) => setRadius(parseInt(e.target.value))}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value={10}>10 miles</option>
-                  <option value={25}>25 miles</option>
-                  <option value={50}>50 miles</option>
-                </select>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Beer Variety</p>
+                  <p className="text-2xl font-bold text-gray-900">{marketData.total_beers}</p>
+                  <p className="text-xs text-gray-500">Total Beers on Tap</p>
+                </div>
+                <BarChart3 className="w-8 h-8 text-green-500" />
               </div>
-              <div className="flex items-end">
-                <button
-                  onClick={searchBreweries}
-                  disabled={loading || !zipcode}
-                  className="px-6 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center space-x-2"
-                >
-                  <Search className="w-4 h-4" />
-                  <span>{loading ? 'Searching...' : 'Search'}</span>
-                </button>
+            </div>
+
+            <div className="bg-white rounded-lg shadow p-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-gray-600">Avg Strength</p>
+                  <p className="text-2xl font-bold text-gray-900">{marketData.avg_abv.toFixed(1)}%</p>
+                  <p className="text-xs text-gray-500">Average ABV</p>
+                </div>
+                <TrendingUp className="w-8 h-8 text-orange-500" />
               </div>
             </div>
           </div>
+        )}
 
-          {/* Results */}
-          {(searchResult || tapAnalysis || marketIntelligence) && (
-            <div className="space-y-8">
-              {/* Tab Navigation */}
-              <div className="border-b border-gray-200">
-                <nav className="-mb-px flex space-x-8">
-                  <button
-                    onClick={() => setActiveTab('breweries')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                      activeTab === 'breweries'
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <MapPin className="w-4 h-4" />
-                      <span>Breweries ({searchResult?.total_breweries || 0})</span>
+        {/* Popular Beer Styles */}
+        {!loading && marketData && marketData.popular_styles.length > 0 && (
+          <div className="bg-white rounded-lg shadow-lg p-6 mb-8">
+            <h2 className="text-xl font-semibold text-gray-800 mb-4">Popular Beer Styles in {zipcode}</h2>
+            <div className="space-y-3">
+              {marketData.popular_styles.slice(0, 6).map((style, index) => (
+                <div key={index} className="flex items-center justify-between">
+                  <span className="text-gray-700 font-medium">{style.style}</span>
+                  <div className="flex items-center space-x-3">
+                    <div className="w-32 bg-gray-200 rounded-full h-2">
+                      <div 
+                        className="bg-blue-600 h-2 rounded-full" 
+                        style={{ width: `${style.percentage}%` }}
+                      ></div>
                     </div>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('analysis')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                      activeTab === 'analysis'
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <BarChart3 className="w-4 h-4" />
-                      <span>Tap Analysis</span>
-                    </div>
-                  </button>
-                  <button
-                    onClick={() => setActiveTab('intelligence')}
-                    className={`py-2 px-1 border-b-2 font-medium text-sm ${
-                      activeTab === 'intelligence'
-                        ? 'border-blue-500 text-blue-600'
-                        : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2">
-                      <TrendingUp className="w-4 h-4" />
-                      <span>Market Intelligence</span>
-                    </div>
-                  </button>
-                </nav>
-              </div>
+                    <span className="text-sm text-gray-600 w-12 text-right">
+                      {style.percentage.toFixed(1)}%
+                    </span>
+                    <span className="text-xs text-gray-500 w-8 text-right">
+                      ({style.count})
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
-              {/* Breweries Tab */}
-              {activeTab === 'breweries' && searchResult && (
-                <div className="space-y-6">
-                  <h3 className="text-2xl font-semibold text-gray-800">
-                    Breweries in {searchResult.zipcode} ({searchResult.radius_miles} mile radius)
-                  </h3>
-                  <div className="grid gap-6">
-                    {searchResult.breweries.map((brewery, index) => (
-                      <div key={index} className="bg-white rounded-lg shadow-lg p-6">
-                        <div className="flex justify-between items-start mb-4">
-                          <div>
-                            <h4 className="text-xl font-semibold text-gray-800">{brewery.name}</h4>
-                            <p className="text-gray-600 flex items-center mt-1">
-                              <MapPin className="w-4 h-4 mr-1" />
-                              {brewery.address}
-                            </p>
-                            {brewery.rating && (
-                              <p className="text-gray-600 flex items-center mt-1">
-                                <Star className="w-4 h-4 mr-1 text-yellow-500" />
-                                {brewery.rating} stars
-                              </p>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            {brewery.website && (
-                              <a
-                                href={brewery.website}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="text-blue-600 hover:text-blue-800 flex items-center"
-                              >
-                                <ExternalLink className="w-4 h-4 mr-1" />
-                                Website
-                              </a>
-                            )}
-                            {brewery.phone && (
-                              <p className="text-gray-600 mt-1">{brewery.phone}</p>
-                            )}
-                          </div>
-                        </div>
-
-                        {brewery.beers.length > 0 && (
-                          <div>
-                            <h5 className="font-semibold text-gray-800 mb-3 flex items-center">
-                              <Beer className="w-4 h-4 mr-2" />
-                              On Tap ({brewery.beers.length} beers)
-                            </h5>
-                            <div className="grid md:grid-cols-2 gap-4">
-                              {brewery.beers.map((beer, beerIndex) => (
-                                <div key={beerIndex} className="border rounded-lg p-4">
-                                  <div className="flex justify-between items-start mb-2">
-                                    <h6 className="font-medium text-gray-800">{beer.name}</h6>
-                                    {beer.price && (
-                                      <span className="text-green-600 font-semibold">{beer.price}</span>
-                                    )}
-                                  </div>
-                                  {beer.style && (
-                                    <p className="text-sm text-blue-600 mb-1">{beer.style}</p>
-                                  )}
-                                  <div className="flex space-x-4 text-sm text-gray-600 mb-2">
-                                    {beer.abv && <span>ABV: {beer.abv}%</span>}
-                                    {beer.ibu && <span>IBU: {beer.ibu}</span>}
-                                  </div>
-                                  {beer.description && (
-                                    <p className="text-sm text-gray-600">{beer.description}</p>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
+        {/* Brewery Listings */}
+        {!loading && breweries.length > 0 && (
+          <div className="bg-white rounded-lg shadow-lg p-6">
+            <h2 className="text-xl font-semibold text-gray-800 mb-6">
+              Breweries Found ({breweries.length})
+            </h2>
+            
+            <div className="space-y-4">
+              {breweries.map((brewery, index) => (
+                <div key={index} className="border border-gray-200 rounded-lg p-4 hover:shadow-md transition-shadow">
+                  <div className="flex justify-between items-start">
+                    <div className="flex-1">
+                      <h3 className="text-lg font-semibold text-gray-800">{brewery.name}</h3>
+                      <p className="text-gray-600 text-sm">{brewery.address}</p>
+                      
+                      <div className="flex items-center space-x-4 mt-2 text-sm text-gray-500">
+                        {brewery.distance_miles && (
+                          <span className="flex items-center">
+                            <MapPin className="w-4 h-4 mr-1" />
+                            {brewery.distance_miles.toFixed(1)} miles
+                          </span>
+                        )}
+                        {brewery.rating && (
+                          <span>⭐ {brewery.rating}/5</span>
+                        )}
+                        {brewery.tap_list && (
+                          <span className="flex items-center">
+                            <BarChart3 className="w-4 h-4 mr-1" />
+                            {brewery.tap_list.length} beers on tap
+                          </span>
                         )}
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
-              {/* Tap Analysis Tab */}
-              {activeTab === 'analysis' && tapAnalysis && (
-                <div className="space-y-6">
-                  <h3 className="text-2xl font-semibold text-gray-800">Tap List Analysis</h3>
-                  
-                  {/* Summary Stats */}
-                  <div className="grid md:grid-cols-2 lg:grid-cols-5 gap-4">
-                    <div className="bg-white rounded-lg shadow p-6 text-center">
-                      <div className="text-3xl font-bold text-blue-600">{tapAnalysis.summary.total_breweries}</div>
-                      <div className="text-gray-600">Breweries</div>
-                    </div>
-                    <div className="bg-white rounded-lg shadow p-6 text-center">
-                      <div className="text-3xl font-bold text-green-600">{tapAnalysis.summary.total_beers}</div>
-                      <div className="text-gray-600">Total Beers</div>
-                    </div>
-                    <div className="bg-white rounded-lg shadow p-6 text-center">
-                      <div className="text-3xl font-bold text-purple-600">{tapAnalysis.summary.unique_styles}</div>
-                      <div className="text-gray-600">Unique Styles</div>
-                    </div>
-                    <div className="bg-white rounded-lg shadow p-6 text-center">
-                      <div className="text-3xl font-bold text-orange-600">
-                        {tapAnalysis.summary.average_abv ? `${tapAnalysis.summary.average_abv}%` : 'N/A'}
+                      {/* Competitive Insight */}
+                      <div className="mt-3 p-2 bg-gray-50 rounded text-sm">
+                        <strong>Competitive Analysis:</strong> {getCompetitiveInsight(brewery)}
                       </div>
-                      <div className="text-gray-600">Avg ABV</div>
                     </div>
-                    <div className="bg-white rounded-lg shadow p-6 text-center">
-                      <div className="text-3xl font-bold text-red-600">
-                        {tapAnalysis.summary.average_ibu ? tapAnalysis.summary.average_ibu : 'N/A'}
-                      </div>
-                      <div className="text-gray-600">Avg IBU</div>
+
+                    <div className="flex items-center space-x-2">
+                      {brewery.website && (
+                        <a 
+                          href={brewery.website} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-800 text-sm"
+                        >
+                          Visit Website
+                        </a>
+                      )}
+                      
+                      {brewery.tap_list && brewery.tap_list.length > 0 && (
+                        <button
+                          onClick={() => toggleBreweryDetails(brewery.name)}
+                          className="flex items-center text-blue-600 hover:text-blue-800 text-sm"
+                        >
+                          {showBreweryDetails[brewery.name] ? (
+                            <>Hide Beers <ChevronUp className="w-4 h-4 ml-1" /></>
+                          ) : (
+                            <>Show Beers <ChevronDown className="w-4 h-4 ml-1" /></>
+                          )}
+                        </button>
+                      )}
                     </div>
                   </div>
 
-                  {/* Top Styles */}
-                  <div className="bg-white rounded-lg shadow-lg p-6">
-                    <h4 className="text-xl font-semibold text-gray-800 mb-4">Most Popular Beer Styles</h4>
-                    <div className="space-y-3">
-                      {tapAnalysis.top_styles.map((style, index) => (
-                        <div key={index} className="flex justify-between items-center">
-                          <span className="text-gray-800">{style.style}</span>
-                          <div className="flex items-center space-x-2">
-                            <div className="w-24 bg-gray-200 rounded-full h-2">
-                              <div
-                                className="bg-blue-600 h-2 rounded-full"
-                                style={{ width: `${(style.count / tapAnalysis.summary.total_beers) * 100}%` }}
-                              ></div>
+                  {/* Beer List (Collapsible) */}
+                  {showBreweryDetails[brewery.name] && brewery.tap_list && (
+                    <div className="mt-4 pt-4 border-t border-gray-200">
+                      <h4 className="font-medium text-gray-700 mb-3">Current Tap List</h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {brewery.tap_list.map((beer, beerIndex) => (
+                          <div key={beerIndex} className="bg-gray-50 rounded p-3">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <h5 className="font-medium text-gray-800">{beer.name}</h5>
+                                <p className="text-sm text-gray-600">{beer.style}</p>
+                                {beer.description && (
+                                  <p className="text-xs text-gray-500 mt-1">{beer.description}</p>
+                                )}
+                              </div>
+                              <div className="text-right text-sm">
+                                <div className="font-medium">{beer.abv}% ABV</div>
+                                {beer.ibu && <div className="text-gray-500">{beer.ibu} IBU</div>}
+                                {beer.price && <div className="text-green-600">{beer.price}</div>}
+                              </div>
                             </div>
-                            <span className="text-gray-600 text-sm">{style.count}</span>
                           </div>
-                        </div>
-                      ))}
+                        ))}
+                      </div>
                     </div>
-                  </div>
+                  )}
                 </div>
-              )}
-
-              {/* Market Intelligence Tab */}
-              {activeTab === 'intelligence' && marketIntelligence && (
-                <div className="space-y-6">
-                  <h3 className="text-2xl font-semibold text-gray-800">Market Intelligence</h3>
-                  
-                  {/* Competitive Landscape */}
-                  <div className="bg-white rounded-lg shadow-lg p-6">
-                    <h4 className="text-xl font-semibold text-gray-800 mb-4">Competitive Landscape</h4>
-                    <div className="grid md:grid-cols-3 gap-4">
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-blue-600">
-                          {marketIntelligence.competitive_landscape.total_competitors}
-                        </div>
-                        <div className="text-gray-600">Competitors</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-yellow-600">
-                          {marketIntelligence.competitive_landscape.average_brewery_rating || 'N/A'}
-                        </div>
-                        <div className="text-gray-600">Avg Rating</div>
-                      </div>
-                      <div className="text-center">
-                        <div className="text-2xl font-bold text-green-600">
-                          {marketIntelligence.competitive_landscape.breweries_with_pricing}
-                        </div>
-                        <div className="text-gray-600">With Pricing</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Pricing Intelligence */}
-                  <div className="bg-white rounded-lg shadow-lg p-6">
-                    <h4 className="text-xl font-semibold text-gray-800 mb-4 flex items-center">
-                      <DollarSign className="w-5 h-5 mr-2" />
-                      Pricing Intelligence
-                    </h4>
-                    <div className="grid md:grid-cols-2 gap-6">
-                      <div>
-                        <h5 className="font-semibold text-gray-700 mb-3">Market Pricing</h5>
-                        <div className="space-y-2">
-                          <div className="flex justify-between">
-                            <span>Average Price:</span>
-                            <span className="font-semibold">
-                              ${marketIntelligence.pricing_intelligence.average_beer_price?.toFixed(2) || 'N/A'}
-                            </span>
-                          </div>
-                          <div className="flex justify-between">
-                            <span>Price Range:</span>
-                            <span className="font-semibold">
-                              ${marketIntelligence.pricing_intelligence.price_range.min || 'N/A'} - 
-                              ${marketIntelligence.pricing_intelligence.price_range.max || 'N/A'}
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                      <div>
-                        <h5 className="font-semibold text-gray-700 mb-3">Pricing by Style</h5>
-                        <div className="space-y-2 max-h-32 overflow-y-auto">
-                          {Object.entries(marketIntelligence.pricing_intelligence.pricing_by_style).map(([style, price]) => (
-                            <div key={style} className="flex justify-between text-sm">
-                              <span className="truncate">{style}</span>
-                              <span className="font-semibold">${price.toFixed(2)}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Recommendations */}
-                  <div className="bg-white rounded-lg shadow-lg p-6">
-                    <h4 className="text-xl font-semibold text-gray-800 mb-4">Strategic Recommendations</h4>
-                    <ul className="space-y-2">
-                      {marketIntelligence.recommendations.map((rec, index) => (
-                        <li key={index} className="flex items-start">
-                          <span className="text-blue-600 mr-2">•</span>
-                          <span className="text-gray-700">{rec}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              )}
+              ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
+
+        {/* No Data State */}
+        {!loading && !error && breweries.length === 0 && zipcode && (
+          <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+            <Search className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+            <h3 className="text-xl font-medium text-gray-900 mb-2">No Results Found</h3>
+            <p className="text-gray-600 mb-4">
+              No breweries found in zip code {zipcode}. This could be because:
+            </p>
+            <ul className="text-sm text-gray-500 text-left max-w-md mx-auto space-y-1">
+              <li>• The area doesn't have any breweries</li>
+              <li>• Google Places API key is not configured</li>
+              <li>• The zip code is invalid or outside service area</li>
+              <li>• Breweries in this area aren't listed on Google Places</li>
+            </ul>
+          </div>
+        )}
+
+        {/* Initial State */}
+        {!loading && !zipcode && (
+          <div className="bg-white rounded-lg shadow-lg p-12 text-center">
+            <MapPin className="w-16 h-16 text-blue-300 mx-auto mb-4" />
+            <h3 className="text-xl font-medium text-gray-900 mb-2">Discover Your Local Beer Market</h3>
+            <p className="text-gray-600 mb-4">
+              Enter a zip code above to analyze the competitive brewery landscape in any area.
+            </p>
+            <div className="text-sm text-gray-500 max-w-lg mx-auto">
+              <p className="mb-2"><strong>What you'll discover:</strong></p>
+              <ul className="text-left space-y-1">
+                <li>• Local brewery density and competition levels</li>
+                <li>• Popular beer styles and market trends</li>
+                <li>• Individual brewery tap list analysis</li>
+                <li>• Competitive positioning insights</li>
+                <li>• Market opportunities and gaps</li>
+              </ul>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
