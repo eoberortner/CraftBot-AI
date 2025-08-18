@@ -1,0 +1,62 @@
+{
+  "test_suite": "CraftBot AI API Comprehensive Tests",
+  "timestamp": "2025-08-18 07:25:51",
+  "total_tests": 9,
+  "passed": 0,
+  "failed": 9,
+  "success_rate": 0.0,
+  "overall_status": "FAIL",
+  "detailed_results": [
+    {
+      "test": "server_health",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /docs (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10e356cf0>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "brewery_search_valid",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /breweries/search/94556 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10eac8cd0>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "brewery_search_invalid",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /breweries/search/00000 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10eac91d0>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "market_intelligence",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /breweries/market-intelligence/94556 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10eaa1220>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "tap_analysis",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /breweries/tap-analysis/94556 (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10eaa16e0>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "cache_operations",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /cache/stats (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10ea85a30>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "recipe_endpoints",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /beer-styles (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10ead0c00>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "error_handling",
+      "status": "fail",
+      "error": "HTTPConnectionPool(host='localhost', port=8000): Max retries exceeded with url: /invalid-endpoint (Caused by ConnectTimeoutError(<urllib3.connection.HTTPConnection object at 0x10ead1040>, 'Connection to localhost timed out. (connect timeout=None)'))"
+    },
+    {
+      "test": "performance_stress",
+      "status": "fail",
+      "requests_sent": 5,
+      "successful_requests": 0,
+      "success_rate": 0.0,
+      "total_time": 129.58579087257385,
+      "avg_response_time": 0,
+      "max_response_time": 0,
+      "min_response_time": 0
+    }
+  ]
+}

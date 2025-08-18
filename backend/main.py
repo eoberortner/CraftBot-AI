@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends, Query, Path
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional, Dict, Any
@@ -25,9 +25,65 @@ from mock_data import MockDataProvider
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(
-    title="Craft Brewing AI Agent",
-    description="AI-powered craft brewing assistant with recipe analysis and taproom curation",
-    version="1.0.0"
+    title="CraftBot AI API",
+    description="""
+    ## CraftBot AI - Brewing Intelligence Platform
+
+    A comprehensive API for craft brewing intelligence, market analysis, and brewery operations.
+
+    ### Features:
+    * **Recipe Analysis**: Calculate ABV, IBU, SRM with precision
+    * **Brewing Guides**: Step-by-step brewing instructions
+    * **Market Intelligence**: Competitive brewery analysis and trends
+    * **Brewery Discovery**: Find and analyze local breweries
+    * **Shopping Lists**: Generate ingredient lists for recipes
+    * **Taproom Curation**: Personalized beer recommendations
+
+    ### Authentication:
+    Currently no authentication required for public endpoints.
+
+    ### Rate Limiting:
+    API calls are rate-limited to ensure fair usage and system stability.
+    """,
+    version="2.0.0",
+    contact={
+        "name": "CraftBot AI Support",
+        "email": "support@craftbot.ai",
+    },
+    license_info={
+        "name": "MIT",
+        "url": "https://opensource.org/licenses/MIT",
+    },
+    openapi_tags=[
+        {
+            "name": "recipes",
+            "description": "Recipe analysis, calculations, and brewing guides",
+        },
+        {
+            "name": "breweries",
+            "description": "Brewery discovery, market intelligence, and competitive analysis",
+        },
+        {
+            "name": "shopping",
+            "description": "Shopping list generation and ingredient sourcing",
+        },
+        {
+            "name": "taproom",
+            "description": "Taproom curation and beer recommendations",
+        },
+        {
+            "name": "external-data",
+            "description": "Weather, events, and social trend data",
+        },
+        {
+            "name": "cache",
+            "description": "Cache management and performance optimization",
+        },
+        {
+            "name": "system",
+            "description": "System health, configuration, and monitoring",
+        },
+    ]
 )
 
 # CORS middleware for frontend integration
@@ -149,11 +205,13 @@ async def get_recipes(db: Session = Depends(get_db)):
     return [{"id": recipe.id, "name": recipe.name, "style_id": recipe.style_id} for recipe in recipes]
 
 # Brewery Scraper Endpoints
-@app.get("/breweries/search/{zipcode}")
+@app.get("/breweries/search/{zipcode}", tags=["breweries"], 
+         summary="Search breweries by zip code",
+         response_description="List of breweries with optional tap lists")
 async def search_breweries_by_zipcode(
-    zipcode: str, 
-    radius_miles: int = 25,
-    include_tap_lists: bool = True
+    zipcode: str = Path(..., description="US zip code to search around", example="94556"), 
+    radius_miles: int = Query(25, description="Search radius in miles", ge=1, le=100),
+    include_tap_lists: bool = Query(True, description="Whether to scrape tap lists")
 ):
     """
     Find breweries near a given zip code and optionally scrape their tap lists
@@ -177,8 +235,13 @@ async def search_breweries_by_zipcode(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error searching breweries: {str(e)}")
 
-@app.get("/breweries/tap-analysis/{zipcode}")
-async def analyze_tap_trends(zipcode: str, radius_miles: int = 25):
+@app.get("/breweries/tap-analysis/{zipcode}", tags=["breweries"],
+         summary="Analyze tap trends and beer styles",
+         response_description="Comprehensive tap list analysis")
+async def analyze_tap_trends(
+    zipcode: str = Path(..., description="US zip code to analyze", example="94556"),
+    radius_miles: int = Query(25, description="Search radius in miles", ge=1, le=100)
+):
     """
     Analyze beer trends and styles available in the area
     
@@ -232,10 +295,16 @@ async def analyze_tap_trends(zipcode: str, radius_miles: int = 25):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error analyzing tap trends: {str(e)}")
 
-@app.get("/breweries/market-intelligence/{zipcode}")
-async def get_market_intelligence(zipcode: str, radius_miles: int = 25):
+@app.get("/breweries/market-intelligence/{zipcode}", tags=["breweries"],
+         summary="Get comprehensive market intelligence",
+         response_description="Market analysis with competitive insights and opportunities")
+async def get_market_intelligence(
+    zipcode: str = Path(..., description="US zip code to analyze", example="94556"),
+    radius_miles: int = Query(25, description="Search radius in miles", ge=1, le=100)
+):
     """
-    Get market intelligence for breweries in the area
+    Get comprehensive market intelligence for the area including competitive analysis,
+    market saturation, pricing trends, and opportunity identification
     
     - **zipcode**: US zip code to analyze
     - **radius_miles**: Search radius in miles (default: 25)
@@ -243,75 +312,219 @@ async def get_market_intelligence(zipcode: str, radius_miles: int = 25):
     try:
         breweries = await brewery_data_service.get_breweries_with_tap_lists(zipcode, radius_miles)
         
-        # Extract market insights
-        pricing_data = []
-        style_popularity = {}
-        brewery_ratings = []
+        if not breweries:
+            return {
+                "zipcode": zipcode,
+                "radius_miles": radius_miles,
+                "total_breweries": 0,
+                "total_beers": 0,
+                "avg_abv": 0,
+                "popular_styles": [],
+                "market_trends": {
+                    "ipa_dominance": 0,
+                    "craft_density": 0,
+                    "innovation_score": 0,
+                    "competition_level": "low",
+                    "market_saturation": "undersaturated"
+                },
+                "competitive_landscape": [],
+                "opportunities": [],
+                "price_analysis": {
+                    "avg_price": 0,
+                    "price_range": "No pricing data available"
+                }
+            }
+        
+        # Comprehensive beer analysis
+        all_beers = []
+        brewery_beer_counts = []
+        price_values = []
+        abv_values = []
+        ibu_values = []
         
         for brewery in breweries:
-            if brewery.rating:
-                brewery_ratings.append(brewery.rating)
+            brewery_beers = brewery.beers or []
+            all_beers.extend(brewery_beers)
+            brewery_beer_counts.append(len(brewery_beers))
             
-            for beer in brewery.beers:
-                # Extract pricing info
+            # Extract pricing data
+            for beer in brewery_beers:
                 if beer.price:
-                    try:
-                        price_value = float(beer.price.replace('$', ''))
-                        pricing_data.append({
-                            "beer_name": beer.name,
-                            "price": price_value,
-                            "style": beer.style,
-                            "abv": beer.abv,
-                            "brewery": brewery.name
-                        })
-                    except:
-                        pass
+                    # Extract numeric price from strings like "$8", "$7.50", etc.
+                    import re
+                    price_match = re.search(r'\$?(\d+\.?\d*)', beer.price)
+                    if price_match:
+                        price_values.append(float(price_match.group(1)))
                 
-                # Track style popularity
-                if beer.style:
-                    style_popularity[beer.style] = style_popularity.get(beer.style, 0) + 1
+                abv_values.append(beer.abv)
+                if hasattr(beer, 'ibu') and beer.ibu:
+                    ibu_values.append(beer.ibu)
         
-        # Calculate average pricing by style
-        style_pricing = {}
-        for price_entry in pricing_data:
-            style = price_entry["style"]
-            if style:
-                if style not in style_pricing:
-                    style_pricing[style] = []
-                style_pricing[style].append(price_entry["price"])
+        total_beers = len(all_beers)
+        total_breweries = len(breweries)
+        avg_abv = sum(abv_values) / len(abv_values) if abv_values else 0
+        avg_beer_count_per_brewery = sum(brewery_beer_counts) / len(brewery_beer_counts) if brewery_beer_counts else 0
         
-        avg_style_pricing = {
-            style: round(sum(prices) / len(prices), 2)
-            for style, prices in style_pricing.items()
-        }
+        # Advanced style analysis
+        style_counts = {}
+        style_abv_map = {}
+        
+        for beer in all_beers:
+            style = beer.style
+            style_counts[style] = style_counts.get(style, 0) + 1
+            
+            if style not in style_abv_map:
+                style_abv_map[style] = []
+            style_abv_map[style].append(beer.abv)
+        
+        popular_styles = [
+            {
+                "style": style, 
+                "count": count, 
+                "percentage": (count / total_beers) * 100,
+                "avg_abv": sum(style_abv_map[style]) / len(style_abv_map[style])
+            }
+            for style, count in sorted(style_counts.items(), key=lambda x: x[1], reverse=True)
+        ]
+        
+        # Market trend analysis
+        ipa_count = sum(1 for beer in all_beers if "IPA" in beer.style.upper())
+        stout_count = sum(1 for beer in all_beers if "STOUT" in beer.style.upper() or "PORTER" in beer.style.upper())
+        lager_count = sum(1 for beer in all_beers if "LAGER" in beer.style.upper() or "PILSNER" in beer.style.upper())
+        sour_count = sum(1 for beer in all_beers if "SOUR" in beer.style.upper() or "GOSE" in beer.style.upper())
+        
+        ipa_dominance = (ipa_count / total_beers) * 100 if total_beers > 0 else 0
+        unique_styles = len(style_counts)
+        innovation_score = unique_styles / total_breweries if total_breweries > 0 else 0
+        
+        # Competition analysis
+        competition_level = "low"
+        market_saturation = "undersaturated"
+        
+        breweries_per_sq_mile = total_breweries / (3.14159 * radius_miles * radius_miles)
+        
+        if breweries_per_sq_mile > 0.05:  # More than 1 brewery per 20 sq miles
+            competition_level = "high"
+            market_saturation = "saturated"
+        elif breweries_per_sq_mile > 0.02:  # 1 brewery per 50 sq miles
+            competition_level = "moderate"
+            market_saturation = "balanced"
+        
+        # Competitive landscape analysis
+        competitive_landscape = []
+        for brewery in breweries[:10]:  # Top 10 closest breweries
+            beer_count = len(brewery.beers) if brewery.beers else 0
+            unique_brewery_styles = len(set(beer.style for beer in brewery.beers)) if brewery.beers else 0
+            
+            threat_level = "low"
+            if beer_count >= 10 and unique_brewery_styles >= 5:
+                threat_level = "high"
+            elif beer_count >= 6 and unique_brewery_styles >= 3:
+                threat_level = "moderate"
+            
+            competitive_landscape.append({
+                "name": brewery.name,
+                "distance_miles": getattr(brewery, 'distance_miles', None),
+                "beer_count": beer_count,
+                "unique_styles": unique_brewery_styles,
+                "threat_level": threat_level,
+                "specialties": list(set(beer.style for beer in brewery.beers))[:3] if brewery.beers else []
+            })
+        
+        # Market opportunities identification
+        opportunities = []
+        
+        # Style gap analysis
+        common_styles = ["American IPA", "Pale Ale", "Lager", "Stout", "Wheat Beer", "Pilsner", "Porter", "Saison", "Sour", "Brown Ale"]
+        missing_styles = [style for style in common_styles if style not in style_counts]
+        
+        if missing_styles:
+            opportunities.append({
+                "type": "style_gap",
+                "title": "Underrepresented Beer Styles",
+                "description": f"Consider these styles with low local competition: {', '.join(missing_styles[:3])}",
+                "priority": "medium" if len(missing_styles) >= 3 else "low"
+            })
+        
+        # ABV gap analysis
+        if avg_abv < 5.5:
+            opportunities.append({
+                "type": "strength_gap",
+                "title": "Higher ABV Market Gap", 
+                "description": f"Local average ABV is {avg_abv:.1f}%. Opportunity for stronger beers (6.5%+ ABV)",
+                "priority": "medium"
+            })
+        elif avg_abv > 6.5:
+            opportunities.append({
+                "type": "session_gap",
+                "title": "Session Beer Opportunity",
+                "description": f"Local average ABV is {avg_abv:.1f}%. Opportunity for session beers (4-5% ABV)", 
+                "priority": "medium"
+            })
+        
+        # Competition density opportunities
+        if competition_level == "low":
+            opportunities.append({
+                "type": "market_entry",
+                "title": "Low Competition Market",
+                "description": f"Only {total_breweries} breweries in {radius_miles} mile radius. Good opportunity for new entrants",
+                "priority": "high"
+            })
+        
+        # Specialty opportunities
+        if ipa_dominance > 40:
+            opportunities.append({
+                "type": "diversification",
+                "title": "Over-saturation of IPAs",
+                "description": f"IPAs represent {ipa_dominance:.1f}% of market. Opportunity in other styles",
+                "priority": "medium"
+            })
+        
+        # Price analysis
+        price_analysis = {"avg_price": 0, "price_range": "No pricing data available"}
+        if price_values:
+            avg_price = sum(price_values) / len(price_values)
+            min_price = min(price_values)
+            max_price = max(price_values)
+            price_analysis = {
+                "avg_price": round(avg_price, 2),
+                "price_range": f"${min_price:.2f} - ${max_price:.2f}",
+                "pricing_opportunity": "premium" if avg_price < 8 else "value" if avg_price > 12 else "competitive"
+            }
         
         return {
-            "market_area": f"{zipcode} ({radius_miles} mile radius)",
-            "competitive_landscape": {
-                "total_competitors": len(breweries),
-                "average_brewery_rating": round(sum(brewery_ratings) / len(brewery_ratings), 1) if brewery_ratings else None,
-                "breweries_with_pricing": len(set(entry["brewery"] for entry in pricing_data))
+            "zipcode": zipcode,
+            "radius_miles": radius_miles,
+            "total_breweries": total_breweries,
+            "total_beers": total_beers,
+            "avg_abv": round(avg_abv, 2),
+            "avg_beers_per_brewery": round(avg_beer_count_per_brewery, 1),
+            "popular_styles": popular_styles[:10],
+            "market_trends": {
+                "ipa_dominance": round(ipa_dominance, 1),
+                "craft_density": round(breweries_per_sq_mile * 100, 2),  # per 100 sq miles for readability
+                "innovation_score": round(innovation_score, 2),
+                "competition_level": competition_level,
+                "market_saturation": market_saturation,
+                "style_diversity": unique_styles
             },
-            "pricing_intelligence": {
-                "average_beer_price": round(sum(entry["price"] for entry in pricing_data) / len(pricing_data), 2) if pricing_data else None,
-                "price_range": {
-                    "min": min(entry["price"] for entry in pricing_data) if pricing_data else None,
-                    "max": max(entry["price"] for entry in pricing_data) if pricing_data else None
-                },
-                "pricing_by_style": avg_style_pricing
-            },
-            "style_trends": sorted(style_popularity.items(), key=lambda x: x[1], reverse=True)[:10],
-            "recommendations": [
-                "Consider pricing IPAs competitively with local market average",
-                "Unique styles may command premium pricing",
-                "Focus on styles popular in your market area"
-            ]
+            "competitive_landscape": competitive_landscape,
+            "opportunities": opportunities,
+            "price_analysis": price_analysis,
+            "beer_strength_distribution": {
+                "session_beers": sum(1 for abv in abv_values if abv <= 5.0) if abv_values else 0,
+                "standard_beers": sum(1 for abv in abv_values if 5.0 < abv <= 7.0) if abv_values else 0,
+                "strong_beers": sum(1 for abv in abv_values if abv > 7.0) if abv_values else 0
+            }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error generating market intelligence: {str(e)}")
+        logger.error(f"Error in market intelligence analysis: {e}")
+        raise HTTPException(status_code=500, detail=f"Error analyzing market: {str(e)}")
 
 # Cache Management Endpoints
-@app.get("/cache/stats")
+@app.get("/cache/stats", tags=["cache"],
+         summary="Get cache statistics",
+         response_description="Cache performance metrics and storage info")
 async def get_cache_stats():
     """Get cache statistics and performance metrics"""
     try:
@@ -342,13 +555,34 @@ async def cleanup_cache():
         raise HTTPException(status_code=500, detail=f"Error during cache cleanup: {str(e)}")
 
 @app.delete("/cache/clear/{zipcode}")
-async def clear_cache_for_zipcode(zipcode: str):
+async def clear_cache_for_zipcode(zipcode: str, radius_miles: int = None):
     """Clear cache for a specific zip code"""
     try:
-        # This would require extending the cache service with a clear method
-        return {"message": f"Cache clearing for zipcode {zipcode} - feature to be implemented"}
+        if hasattr(brewery_data_service, 'cache_service') and brewery_data_service.cache_service:
+            result = brewery_data_service.cache_service.clear_cache_for_zipcode(zipcode, radius_miles)
+            return {
+                "message": f"Cache cleared for zipcode {zipcode}",
+                "details": result
+            }
+        else:
+            return {"message": "Cache service not available"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error clearing cache: {str(e)}")
+
+@app.delete("/cache/clear")
+async def clear_all_cache():
+    """Clear all cache entries"""
+    try:
+        if hasattr(brewery_data_service, 'cache_service') and brewery_data_service.cache_service:
+            result = brewery_data_service.cache_service.clear_all_cache()
+            return {
+                "message": "All cache cleared successfully",
+                "details": result
+            }
+        else:
+            return {"message": "Cache service not available"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error clearing all cache: {str(e)}")
 
 # Scraper Management Endpoints
 @app.get("/scraper/config")

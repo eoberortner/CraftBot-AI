@@ -219,6 +219,81 @@ class BreweryCacheService:
         finally:
             db.close()
     
+    def clear_all_cache(self) -> Dict[str, int]:
+        """Clear all cache entries (search cache and brewery cache)"""
+        db = self.SessionLocal()
+        try:
+            # Count entries before deletion
+            search_count = db.query(BrewerySearchCache).count()
+            brewery_count = db.query(CachedBrewery).count()
+            
+            # Delete all entries
+            db.query(BrewerySearchCache).delete()
+            db.query(CachedBrewery).delete()
+            
+            db.commit()
+            
+            # Clear in-memory cache as well
+            self.in_memory_cache.clear()
+            
+            logger.info(f"Cleared all cache: {search_count} search entries and {brewery_count} brewery entries")
+            
+            return {
+                "search_entries_cleared": search_count,
+                "brewery_entries_cleared": brewery_count,
+                "in_memory_cache_cleared": True
+            }
+            
+        except Exception as e:
+            logger.error(f"Error clearing all cache: {e}")
+            db.rollback()
+            return {"error": str(e)}
+        finally:
+            db.close()
+    
+    def clear_cache_for_zipcode(self, zipcode: str, radius_miles: int = None) -> Dict[str, int]:
+        """Clear cache entries for a specific zip code"""
+        db = self.SessionLocal()
+        try:
+            query = db.query(BrewerySearchCache).filter(BrewerySearchCache.zipcode == zipcode)
+            
+            if radius_miles is not None:
+                query = query.filter(BrewerySearchCache.radius_miles == radius_miles)
+            
+            # Count and delete
+            count = query.count()
+            query.delete()
+            
+            db.commit()
+            
+            # Remove from in-memory cache
+            if radius_miles is not None:
+                cache_key = self._generate_cache_key(zipcode, radius_miles)
+                if cache_key in self.in_memory_cache:
+                    del self.in_memory_cache[cache_key]
+            else:
+                # Remove all entries for this zipcode from memory cache
+                keys_to_remove = []
+                for key, (data, expires_at) in self.in_memory_cache.items():
+                    # This is a simplified approach - in production you might want to store zipcode metadata
+                    pass  # For now, we'll clear in-memory cache completely
+                self.in_memory_cache.clear()
+            
+            logger.info(f"Cleared cache for zipcode {zipcode}: {count} entries")
+            
+            return {
+                "entries_cleared": count,
+                "zipcode": zipcode,
+                "radius_miles": radius_miles
+            }
+            
+        except Exception as e:
+            logger.error(f"Error clearing cache for zipcode {zipcode}: {e}")
+            db.rollback()
+            return {"error": str(e)}
+        finally:
+            db.close()
+    
     def get_cache_stats(self) -> Dict[str, Any]:
         """Get cache statistics"""
         db = self.SessionLocal()
